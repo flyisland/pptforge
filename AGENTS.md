@@ -38,6 +38,9 @@ src/pptforge/
 - **Validate before write**: all checks pass before any file is written to the output
 - **Source expression**: proposal uses strings like `gitlab[CI/CD]:1-3, 5` parsed by `config.parse_source_expr()`
 - **Tag resolution**: merger calls `config.resolve_source_pages()` → extract_index → filter by tag → resolve negatives
+- **Tag order preserved**: `[tag1, tag2]` in source expression orders pages by tag1 first, then tag2, etc.
+- **Build output**: `_print_source_table()` shows a preview table before merge; `_print_info()` runs `info` on the output after build
+- **Only two commands**: `build` (from proposal) and `info` (tag inspection on any pptx)
 
 ## Common Pitfalls
 
@@ -47,6 +50,7 @@ src/pptforge/
 4. Circular imports: shared constants live in `constants.py`, not in `merger.py` or `layout_manager.py`.
 5. **Negative page parsing**: `-3--1` is parsed as range[-3, -1]; the right side after `--` is implicitly negated — do NOT use `str.split("--")` alone.
 6. **Tag resolution**: tag-filtered sources are resolved by calling `extract_index()` in real-time; no cache file needed.
+7. **Tag order**: `_get_tagged_pages()` now returns pages in tag order (not sorted). `resolve_source_pages()` skips `sorted(set(...))` when tags are present. Any new code touching page resolution must preserve this ordering.
 
 ## Commands
 

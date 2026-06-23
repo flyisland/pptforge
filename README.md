@@ -27,17 +27,7 @@ kubernetes = "/shared/slides/products/kubernetes/kubernetes.pptx"
 cases_fin  = "/shared/slides/cases/金融行业/cases_fin.pptx"
 ```
 
-### 2. Scan metadata (optional)
-
-Index slide notes to enable tag-based page selection:
-
-```bash
-pptforge index path/to/source.pptx
-```
-
-This generates `source.index.toml` alongside the source file.
-
-### 3. Create a proposal YAML
+### 2. Create a proposal YAML
 
 ```yaml
 meta:
@@ -61,26 +51,37 @@ slides:
 | Part | Required | Description |
 |------|----------|-------------|
 | `source` | ✅ | File alias (from `config.toml`) or file path |
-| `[tags]` | Optional | Comma-separated tag filter (union) |
+| `[tags]` | Optional | Comma-separated tag filter (union); order is preserved in output |
 | `:pages` | Optional | Comma-separated page specs, 1-based relative to filtered set |
 
 Page spec supports negatives for relative positioning: `-1` = last page, `-3--1` = last 3 pages.
 
-### 4. Build
+Tags defined in slide notes (`@tags`, `@tag-start`/`@tag-end`) are read directly at build time — no separate index step needed.
+
+### 3. Build
 
 ```bash
 pptforge build proposal.yaml --force
 ```
 
+Before generating the output, a table displays each source entry with:
+
+| Column | Description |
+|--------|-------------|
+| 页码 | Output page numbers in the new file |
+| 源文件 | Source file name |
+| tags:页码 | Tags from the source expression (preserving order) and page spec |
+| 真实页码 | Resolved page numbers in the source file |
+| 页数 | Page count for this entry |
+
+After the build completes, `info` is automatically run on the generated file to show its tag breakdown.
+
 ## Commands
 
 | Command | Description |
 |---------|-------------|
-| `pptforge index <file.pptx>` | Scan notes metadata, generate `.index.toml` |
-| `pptforge list <file.pptx>` | List tag ranges and per-page tags |
 | `pptforge build <proposal.yaml>` | Build new PPTX from proposal |
-| `pptforge lint <directory>` | Validate all PPTX files in a directory |
-| `pptforge outdated <proposal.yaml>` | Check if source files have been updated |
+| `pptforge info <file.pptx>` | Show tag ranges and report pairing errors |
 
 ## Slide Notes Metadata
 
