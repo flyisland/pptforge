@@ -1,5 +1,4 @@
 import os
-from pathlib import Path
 
 import yaml
 
@@ -8,14 +7,6 @@ from pptforge.models import PresentationIndex, ProposalConfig, SlideSource
 
 class ParseError(ValueError):
     pass
-
-
-def load_global_config() -> dict:
-    config_path = Path.home() / ".pptforge" / "config.toml"
-    if not config_path.exists():
-        return {}
-    with open(config_path, "rb") as f:
-        return tomllib.load(f)
 
 
 def _parse_page_expr(expr: str) -> list[int]:
@@ -128,19 +119,19 @@ def resolve_source_pages(
     return sorted(set(resolved))
 
 
-def load_proposal(path: str, global_config: dict) -> ProposalConfig:
+def load_proposal(path: str) -> ProposalConfig:
     with open(path, "r", encoding="utf-8") as f:
         data = yaml.safe_load(f)
 
+    proposal_dir = os.path.dirname(os.path.abspath(path))
+
     output_path = data.get("output", "")
     if not os.path.isabs(output_path):
-        proposal_dir = os.path.dirname(os.path.abspath(path))
         output_path = os.path.normpath(
             os.path.join(proposal_dir, output_path)
         )
 
-    sources_dict = global_config.get("sources", {})
-    meta = data.get("meta", {})
+    description = data.get("description", "")
 
     sources = []
     for item in data.get("slides", []):
@@ -149,13 +140,10 @@ def load_proposal(path: str, global_config: dict) -> ProposalConfig:
 
         slide_source = parse_source_expr(item)
 
-        source_key = slide_source.pptx_path
-        if source_key in sources_dict:
-            pptx_path = sources_dict[source_key]
-        else:
-            proposal_dir = os.path.dirname(os.path.abspath(path))
+        pptx_path = slide_source.pptx_path
+        if not os.path.isabs(pptx_path):
             pptx_path = os.path.normpath(
-                os.path.join(proposal_dir, source_key)
+                os.path.join(proposal_dir, pptx_path)
             )
         pptx_path = os.path.abspath(pptx_path)
 
@@ -170,5 +158,5 @@ def load_proposal(path: str, global_config: dict) -> ProposalConfig:
     return ProposalConfig(
         output_path=output_path,
         sources=sources,
-        meta=meta,
+        description=description,
     )

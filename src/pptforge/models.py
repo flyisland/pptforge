@@ -12,7 +12,7 @@ class SlideSource:
 class ProposalConfig:
     output_path: str
     sources: list[SlideSource]
-    meta: dict = field(default_factory=dict)
+    description: str = ""
 
 
 @dataclass

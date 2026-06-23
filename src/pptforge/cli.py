@@ -6,7 +6,7 @@ import typer
 from rich.console import Console
 from rich.table import Table
 
-from pptforge.config import load_global_config, load_proposal, resolve_source_pages
+from pptforge.config import load_proposal, resolve_source_pages
 from pptforge.validator import (
     validate_static,
     validate_content,
@@ -123,11 +123,10 @@ def build(
 ):
     """根据 proposal YAML 生成新 PPTX"""
     try:
-        global_config = load_global_config()
         try:
-            proposal = load_proposal(proposal_path, global_config)
+            proposal = load_proposal(proposal_path)
         except Exception as e:
-            console.print(f"✗ 无法读取配置文件：{e}")
+            console.print(f"✗ 无法读取 proposal：{e}")
             raise typer.Exit(1)
 
         try:

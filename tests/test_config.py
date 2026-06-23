@@ -75,7 +75,7 @@ def test_parse_source_expr_file_path_with_pages():
 
 def test_load_proposal():
     fixture = os.path.abspath("tests/fixtures/proposal_test.yaml")
-    proposal = load_proposal(fixture, {})
+    proposal = load_proposal(fixture)
     assert "output/test_output.pptx" in proposal.output_path
     assert len(proposal.sources) == 1
     assert proposal.sources[0].pptx_path.endswith("simple.pptx")

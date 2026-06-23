@@ -1,74 +1,75 @@
-# pptforge — Coding Agent Guide
+# pptforge — Coding Agent 指南
 
-## Design Principle: Pass-Through (透传)
+## 核心原则：透传
 
-**NEVER parse and rebuild slide XML content.** Slide XML must be copied byte-for-byte.
-Only modify `_rels` files (media paths) and structural files (`Content_Types.xml`, `presentation.xml`).
+**严禁解析和重建 slide XML 内容。** Slide XML 必须逐字节复制。
+只能修改 `_rels`（媒体路径）和结构文件（`Content_Types.xml`、`presentation.xml`）。
 
 ```
-Wrong: source XML → parse → modify → serialize  (loses content)
-Right: source XML → copy verbatim → edit media paths only → output  (lossless)
+错误：源 XML → 解析 → 修改 → 序列化  （内容丢失）
+正确：源 XML → 逐字节复制 → 仅改媒体路径 → 输出 （无损）
 ```
 
-- **Forbidden**: `import python-pptx` under any circumstances
-- **Allowed**: `lxml` for `_rels`, `Content_Types.xml`, `presentation.xml`, notes text extraction only
-- **lxml forbidden for**: parsing or modifying `ppt/slides/slide*.xml`
+- **禁止**：任何形式的 `import python-pptx`
+- **允许**：在 `_rels`、`Content_Types.xml`、`presentation.xml`、notes 文本提取中使用 `lxml`
+- **禁止 lxml 用于**：解析或修改 `ppt/slides/slide*.xml`
 
-## Architecture
+详细合并算法见 `docs/DESIGN.md`。
+
+## 架构
 
 ```
 src/pptforge/
-├── cli.py             # Typer CLI entry point (build/info)
-├── merger.py          # Core merge logic, slide copying, ZIP manipulation
-├── layout_manager.py  # SlideLayout/SlideMaster migration across source files
-├── media.py           # MediaManager: hash-based dedup, sequential naming
-├── extractor.py       # Index scanner: tag parsing + range computation
-├── validator.py       # Two-phase validation (static + content), tag validation
-├── config.py          # Config I/O, source expression parser, page spec resolver
-├── models.py          # Dataclasses: SlideSource, ProposalConfig, SlideMetadata, PresentationIndex
-└── constants.py       # XML namespace URIs, relationship type constants, media MIME types
+├── cli.py             # Typer CLI 入口（build / info）
+├── merger.py          # 核心合并逻辑、slide 复制、ZIP 操作
+├── layout_manager.py  # SlideLayout / SlideMaster 跨源迁移
+├── media.py           # MediaManager：基于哈希的去重、顺序命名
+├── extractor.py       # 索引扫描：tag 解析 + 范围计算
+├── validator.py       # 两阶段校验（静态 + 内容）、tag 校验
+├── config.py          # 配置 I/O、源表达式解析、页码解析器
+├── models.py          # 数据类：SlideSource、ProposalConfig、SlideMetadata、PresentationIndex
+└── constants.py       # XML 命名空间 URI、关系类型常量、媒体 MIME 类型
 ```
 
-## Key Conventions
+## 关键约定
 
-- **Pages are 1-based** everywhere in user-facing code
-- **Slide order from `_rels`**: always read `ppt/_rels/presentation.xml.rels` for slide sequence, never `zipfile.namelist()`
-- **rId scope**: rId values are scoped per-file; only `presentation.xml.rels` needs global rId allocation for slides
-- **Temp file strategy**: write to `output.pptx.tmp`, then `os.replace()` for atomic final write; delete `.tmp` on failure
-- **Validate before write**: all checks pass before any file is written to the output
-- **Source expression**: proposal uses strings like `gitlab[CI/CD]:1-3, 5` parsed by `config.parse_source_expr()`
-- **Tag resolution**: merger calls `config.resolve_source_pages()` → extract_index → filter by tag → resolve negatives
-- **Tag order preserved**: `[tag1, tag2]` in source expression orders pages by tag1 first, then tag2, etc.
-- **Build output**: `_print_source_table()` shows a preview table before merge; `_print_info()` runs `info` on the output after build
-- **Only two commands**: `build` (from proposal) and `info` (tag inspection on any pptx)
+- **页面均从 1 开始计数**（所有面向用户的代码）
+- **从 `_rels` 获取 slide 顺序**：始终从 `ppt/_rels/presentation.xml.rels` 读取，绝不使用 `zipfile.namelist()`
+- **rId 作用域**：rId 按文件隔离；只有 `presentation.xml.rels` 需要为 slide 分配全局 rId
+- **临时文件策略**：写入 `output.pptx.tmp`，然后 `os.replace()` 原子写入；失败时删除 `.tmp`
+- **先校验再写入**：所有检查通过后才开始写入输出文件
+- **源表达式**：proposal 中形如 `gitlab[CI/CD]:1-3, 5`，由 `config.parse_source_expr()` 解析
+- **Tag 顺序保留**：`[tag1, tag2]` 中 tag1 的页面在前，tag2 的页面在后
+- **Build 输出**：`_print_source_table()` 在 merge 前显示预览表格；`_print_info()` 在 build 后自动执行 info
+- **只有两个命令**：`build`（基于 proposal）和 `info`（查看任意 pptx 的 tag）
 
-## Common Pitfalls
+## 常见陷阱
 
-1. Path normalization: `_rels` Target values are relative (e.g. `../media/image1.png`). Always use `os.path.normpath()` before `src_zip.read()`.
-2. Content-Types: every new slide, notes slide, layout, master, and media extension must be registered in `[Content_Types].xml`.
-3. Duplicate names: don't let `_copy_skeleton` copy files that are later overwritten (`presentation.xml`, `presentation.xml.rels`, `[Content_Types].xml`).
-4. Circular imports: shared constants live in `constants.py`, not in `merger.py` or `layout_manager.py`.
-5. **Negative page parsing**: `-3--1` is parsed as range[-3, -1]; the right side after `--` is implicitly negated — do NOT use `str.split("--")` alone.
-6. **Tag resolution**: tag-filtered sources are resolved by calling `extract_index()` in real-time; no cache file needed.
-7. **Tag order**: `_get_tagged_pages()` now returns pages in tag order (not sorted). `resolve_source_pages()` skips `sorted(set(...))` when tags are present. Any new code touching page resolution must preserve this ordering.
+1. **路径标准化**：`_rels` 的 Target 是相对路径（如 `../media/image1.png`）。用 `os.path.normpath()` 拼接后再传给 `src_zip.read()`。
+2. **Content-Type 注册**：每个新 slide、notes slide、layout、master 和媒体扩展名都必须在 `[Content_Types].xml` 中注册。
+3. **文件重复**：`_copy_skeleton` 不要复制稍后会被覆盖的文件（`presentation.xml`、`presentation.xml.rels`、`[Content_Types].xml`）。
+4. **循环引用**：共享常量放在 `constants.py` 中，不要放在 `merger.py` 或 `layout_manager.py`。
+5. **负页码解析**：`-3--1` 解析为范围 [-3, -1]；`--` 右侧隐式取负——不要单独用 `str.split("--")`。
+6. **Tag 解析**：带 tag 的源通过 `extract_index()` 实时解析，无需缓存文件。
+7. **Tag 顺序**：`_get_tagged_pages()` 按 tag 顺序返回页面（不排序）。`resolve_source_pages()` 在有 tag 时跳过 `sorted(set(...))`。涉及页面解析的新代码必须保持此顺序。
 
-## Commands
+## 命令
 
 ```bash
-# Run tests
+# 运行测试
 uv run pytest
 
-# Run specific test file
+# 运行指定测试文件
 uv run pytest tests/test_merger_media.py -v
 
-# Run CLI
+# 运行 CLI
 uv run pptforge build proposal.yaml --force
 uv run pptforge info file.pptx
 ```
 
-## Dependency Setup
+## 依赖安装
 
 ```bash
-uv add lxml pyyaml typer rich    # runtime
-uv add --dev pytest               # dev
+uv add lxml pyyaml typer rich    # 运行时依赖
+uv add --dev pytest               # 开发依赖
 ```

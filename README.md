@@ -1,91 +1,28 @@
 # pptforge
 
-PPTX slide extractor and composer for sales teams. Extract specific pages from multiple PPTX source files and compose them into a new presentation — losslessly.
+PPTX 页面提取与合成工具。从多个 PPTX 源文件中提取指定页面，无损合成为一个新的演示文稿。
 
-## Install
+## 安装
 
 ```bash
 uv tool install .
 ```
 
-Or run directly without installing:
+或直接运行（无需安装）：
 
 ```bash
 uv run pptforge --help
 ```
 
-## Usage
+## 使用
 
-### 1. Prepare source files
+### 1. 准备源文件
 
-Put your PPTX files in a shared directory. Optionally set up a global config at `~/.pptforge/config.toml`:
+将 PPTX 文件放在共享目录中。proposal 中引用源文件时，支持相对路径（相对于 proposal 所在目录）和绝对路径。
 
-```toml
-[sources]
-gitlab     = "/shared/slides/products/gitlab/gitlab.pptx"
-kubernetes = "/shared/slides/products/kubernetes/kubernetes.pptx"
-cases_fin  = "/shared/slides/cases/金融行业/cases_fin.pptx"
-```
+### 2. 在 Slide Notes 中定义 Tag
 
-### 2. Create a proposal YAML
-
-```yaml
-meta:
-  client: 客户A
-  author: 李四
-  purpose: 初次拜访，侧重DevOps转型
-
-output: ./output/客户A_20240715.pptx
-
-slides:
-  - gitlab[CI/CD]
-  - gitlab[CI/CD, Pipeline]:1-3
-  - gitlab[CI/CD]:-1
-  - cases_fin:3, 5
-  - kubernetes:3-7
-  - ./临时/定制页.pptx
-```
-
-**Source expression syntax**: `source[tag1, tag2, ...]:range1, range2, ...`
-
-| Part | Required | Description |
-|------|----------|-------------|
-| `source` | ✅ | File alias (from `config.toml`) or file path |
-| `[tags]` | Optional | Comma-separated tag filter (union); order is preserved in output |
-| `:pages` | Optional | Comma-separated page specs, 1-based relative to filtered set |
-
-Page spec supports negatives for relative positioning: `-1` = last page, `-3--1` = last 3 pages.
-
-Tags defined in slide notes (`@tags`, `@tag-start`/`@tag-end`) are read directly at build time — no separate index step needed.
-
-### 3. Build
-
-```bash
-pptforge build proposal.yaml --force
-```
-
-Before generating the output, a table displays each source entry with:
-
-| Column | Description |
-|--------|-------------|
-| 页码 | Output page numbers in the new file |
-| 源文件 | Source file name |
-| tags:页码 | Tags from the source expression (preserving order) and page spec |
-| 真实页码 | Resolved page numbers in the source file |
-| 页数 | Page count for this entry |
-
-After the build completes, `info` is automatically run on the generated file to show its tag breakdown.
-
-## Commands
-
-| Command | Description |
-|---------|-------------|
-| `pptforge build <proposal.yaml>` | Build new PPTX from proposal |
-| `pptforge info <file.pptx>` | Show tag ranges and report pairing errors |
-
-## Slide Notes Metadata
-
-Add tags to slide notes for tag-based page selection. Supports three markers:
+在源文件的 slide notes 中添加 tag，用于后续按 tag 筛选页面。支持三种标记：
 
 ```
 @tags: Pipeline, 重点功能
@@ -93,24 +30,76 @@ Add tags to slide notes for tag-based page selection. Supports three markers:
 @tag-end: CI/CD
 ```
 
-- `@tags` — single-page tags (comma-separated)
-- `@tag-start` / `@tag-end` — range tags (supports nesting and crossing)
-- All other `@`-prefixed fields are ignored
+- `@tags` — 单页 tag（逗号分隔）
+- `@tag-start` / `@tag-end` — 范围 tag（支持嵌套和交叉）
+- 其他 `@` 开头的字段被忽略
 
-Tag ranges are computed by pairing start/end markers. Unpaired `@tag-start` auto-terminates preceding unclosed ranges. Unclosed ranges at end of file trigger an error.
+Tag 范围通过配对 start/end 标记计算。未配对的 `@tag-start` 会自动结束前面的未闭合范围。文件末尾未闭合的范围会报错。
 
-## How It Works
+### 3. 创建 proposal YAML
 
-PPTX files are ZIP archives. pptforge copies slide XML byte-for-byte without parsing,
-only updating media file references in `_rels` files. This guarantees zero content loss.
+```yaml
+description: 客户A初次拜访，侧重DevOps转型
 
-## Development
+output: ./output/客户A_20240715.pptx
+
+slides:
+  - ./sources/gitlab.pptx[CI/CD]
+  - ./sources/gitlab.pptx[CI/CD, Pipeline]:1-3
+  - ./sources/gitlab.pptx[CI/CD]:-1
+  - ./sources/cases_fin.pptx:3, 5
+  - ./sources/kubernetes.pptx:3-7
+  - ./临时/定制页.pptx
+```
+
+**源表达式语法**: `source[tag1, tag2, ...]:range1, range2, ...`
+
+| 部分 | 必填 | 说明 |
+|------|------|------|
+| `source` | ✅ | PPTX 文件路径（相对或绝对） |
+| `[tags]` | 可选 | 逗号分隔的 tag 筛选条件（并集）；顺序影响输出页面排序 |
+| `:pages` | 可选 | 逗号分隔的页码表达式，1-based，相对于筛选后的集合 |
+
+页码支持负数相对定位：`-1` = 最后一页，`-3--1` = 最后 3 页。
+
+Slide notes 中定义的 tag（`@tags`、`@tag-start`/`@tag-end`）在构建时自动读取——无需单独的 index 步骤。
+
+### 4. 构建
+
+```bash
+pptforge build proposal.yaml --force
+```
+
+生成文件之前，预览表格展示每个源：
+
+| 列名 | 说明 |
+|------|------|
+| 页码 | 输出文件中的页面编号 |
+| 源文件 | PPTX 源文件名 |
+| tags:页码 | 源表达式中的 tag（保持顺序）及页码表达式 |
+| 真实页码 | 在源文件中解析后的真实页码 |
+| 页数 | 该条目的页面数 |
+
+构建完成后，自动对生成的文件执行 `info` 命令，展示其 tag 分布。
+
+## 命令
+
+| 命令 | 说明 |
+|------|------|
+| `pptforge build <proposal.yaml>` | 根据 proposal 构建新 PPTX |
+| `pptforge info <file.pptx>` | 展示 tag 范围并报告配对错误 |
+
+## 工作原理
+
+PPTX 文件本质是 ZIP 压缩包。pptforge 逐字节复制 slide XML，仅更新 `_rels` 文件中的媒体引用，确保零内容丢失。
+
+## 开发
 
 ```bash
 uv run pytest
 ```
 
-## Requirements
+## 环境要求
 
 - Python 3.11+
-- Dependencies: `lxml`, `pyyaml`, `typer`, `rich`
+- 依赖：`lxml`、`pyyaml`、`typer`、`rich`
