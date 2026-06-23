@@ -83,11 +83,14 @@ def parse_source_expr(expr: str) -> SlideSource:
 
 
 def _get_tagged_pages(index: PresentationIndex, tags: list[str]) -> list[int]:
-    tagged: set[int] = set()
+    seen: set[int] = set()
+    result: list[int] = []
     for tag in tags:
-        for p in index.tags.get(tag, []):
-            tagged.add(p)
-    return sorted(tagged)
+        for p in sorted(index.tags.get(tag, [])):
+            if p not in seen:
+                seen.add(p)
+                result.append(p)
+    return result
 
 
 def resolve_source_pages(
@@ -120,6 +123,8 @@ def resolve_source_pages(
             if abs_idx >= 0:
                 resolved.append(base[abs_idx])
 
+    if source.tags:
+        return resolved
     return sorted(set(resolved))
 
 
