@@ -18,11 +18,11 @@ Right: source XML → copy verbatim → edit media paths only → output  (lossl
 
 ```
 src/pptforge/
-├── cli.py             # Typer CLI entry point (build/index/list/lint/outdated)
+├── cli.py             # Typer CLI entry point (build/info)
 ├── merger.py          # Core merge logic, slide copying, ZIP manipulation
 ├── layout_manager.py  # SlideLayout/SlideMaster migration across source files
 ├── media.py           # MediaManager: hash-based dedup, sequential naming
-├── extractor.py       # Index scanner: tag parsing + range computation, writes .index.toml
+├── extractor.py       # Index scanner: tag parsing + range computation
 ├── validator.py       # Two-phase validation (static + content), tag validation
 ├── config.py          # Config I/O, source expression parser, page spec resolver
 ├── models.py          # Dataclasses: SlideSource, ProposalConfig, SlideMetadata, PresentationIndex
@@ -37,7 +37,7 @@ src/pptforge/
 - **Temp file strategy**: write to `output.pptx.tmp`, then `os.replace()` for atomic final write; delete `.tmp` on failure
 - **Validate before write**: all checks pass before any file is written to the output
 - **Source expression**: proposal uses strings like `gitlab[CI/CD]:1-3, 5` parsed by `config.parse_source_expr()`
-- **Tag resolution**: merger calls `config.resolve_source_pages()` → read index → filter by tag → resolve negatives
+- **Tag resolution**: merger calls `config.resolve_source_pages()` → extract_index → filter by tag → resolve negatives
 
 ## Common Pitfalls
 
@@ -46,7 +46,7 @@ src/pptforge/
 3. Duplicate names: don't let `_copy_skeleton` copy files that are later overwritten (`presentation.xml`, `presentation.xml.rels`, `[Content_Types].xml`).
 4. Circular imports: shared constants live in `constants.py`, not in `merger.py` or `layout_manager.py`.
 5. **Negative page parsing**: `-3--1` is parsed as range[-3, -1]; the right side after `--` is implicitly negated — do NOT use `str.split("--")` alone.
-6. **Tag/index dependency**: tag-filtered sources require `.index.toml`; merger and validator both call `find_index_file()` before `resolve_source_pages()`. Missing index = extractor error at build time.
+6. **Tag resolution**: tag-filtered sources are resolved by calling `extract_index()` in real-time; no cache file needed.
 
 ## Commands
 
@@ -59,10 +59,7 @@ uv run pytest tests/test_merger_media.py -v
 
 # Run CLI
 uv run pptforge build proposal.yaml --force
-uv run pptforge index file.pptx
-uv run pptforge list file.pptx
-uv run pptforge lint <directory>
-uv run pptforge outdated proposal.yaml
+uv run pptforge info file.pptx
 ```
 
 ## Dependency Setup

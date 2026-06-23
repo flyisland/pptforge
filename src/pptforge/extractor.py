@@ -1,6 +1,5 @@
 import os
 import zipfile
-from datetime import datetime
 from lxml import etree
 
 from pptforge.models import PresentationIndex, SlideMetadata
@@ -171,44 +170,10 @@ def extract_index(pptx_path: str) -> PresentationIndex:
             page_num = i + 1
             per_page_notes[page_num] = _find_notes_for_slide(z, slide_paths[i])
 
-    tags_dict, pages, errors = _compute_tags(per_page_notes)
-
-    if errors:
-        raise ExtractError(errors)
+    tags_dict, pages, _errors = _compute_tags(per_page_notes)
 
     return PresentationIndex(
         source_path=os.path.basename(pptx_path),
-        generated_at=datetime.now().isoformat(),
         tags=tags_dict,
         pages=pages,
     )
-
-
-def write_index_toml(index: PresentationIndex, output_path: str) -> None:
-    lines = [
-        "# 自动生成，请勿手动编辑",
-        "# 由 pptforge index 生成",
-        f'generated_at = "{index.generated_at}"',
-        f'source = "{index.source_path}"',
-        "",
-    ]
-
-    if index.tags:
-        lines.append("[tags]")
-        for name in sorted(index.tags):
-            page_str = ", ".join(str(p) for p in index.tags[name])
-            lines.append(f'"{name}" = {{ pages = [{page_str}] }}')
-        lines.append("")
-
-    if index.pages:
-        lines.append("[pages]")
-        for num in sorted(index.pages):
-            meta = index.pages[num]
-            lines.append(f"[pages.{num}]")
-            if meta.tags:
-                tag_str = ", ".join(f'"{t}"' for t in meta.tags)
-                lines.append(f"tags = [{tag_str}]")
-            lines.append("")
-
-    with open(output_path, "w", encoding="utf-8") as f:
-        f.write("\n".join(lines))

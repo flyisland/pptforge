@@ -2,8 +2,6 @@ import os
 import zipfile
 from lxml import etree
 
-import tomllib
-
 from pptforge.models import ProposalConfig
 from pptforge.media import MediaManager
 from pptforge.layout_manager import LayoutManager
@@ -17,7 +15,8 @@ from pptforge.constants import (
     MEDIA_CONTENT_TYPES,
     LAYOUT_REL_TYPES,
 )
-from pptforge.config import resolve_source_pages, find_index_file
+from pptforge.config import resolve_source_pages
+from pptforge.extractor import extract_index
 
 
 def _get_slide_paths(src_zip: zipfile.ZipFile) -> list[str]:
@@ -176,10 +175,7 @@ def merge(proposal: ProposalConfig) -> None:
                     slide_paths = _get_slide_paths(src_zip)
                     index = None
                     if source.tags:
-                        idx_path = find_index_file(source.pptx_path)
-                        if idx_path:
-                            with open(idx_path, "rb") as f:
-                                index = tomllib.load(f)
+                        index = extract_index(source.pptx_path)
                     resolved_pages = resolve_source_pages(
                         source, len(slide_paths), index
                     )

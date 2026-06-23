@@ -1,10 +1,9 @@
 import os
-import tomllib
 from pathlib import Path
 
 import yaml
 
-from pptforge.models import ProposalConfig, SlideSource
+from pptforge.models import PresentationIndex, ProposalConfig, SlideSource
 
 
 class ParseError(ValueError):
@@ -83,34 +82,10 @@ def parse_source_expr(expr: str) -> SlideSource:
     return SlideSource(pptx_path=source_part, tags=tags, pages=pages)
 
 
-def _load_index_toml(index_path: str) -> dict | None:
-    try:
-        with open(index_path, "rb") as f:
-            return tomllib.load(f)
-    except Exception:
-        return None
-
-
-def find_index_file(pptx_path: str) -> str | None:
-    base = os.path.splitext(pptx_path)[0]
-    index_path = base + ".index.toml"
-    if os.path.exists(index_path):
-        return index_path
-    return None
-
-
-def _get_tagged_pages(index: dict, tags: list[str]) -> list[int]:
+def _get_tagged_pages(index: PresentationIndex, tags: list[str]) -> list[int]:
     tagged: set[int] = set()
-    tag_index = index.get("tags", {})
     for tag in tags:
-        entry = tag_index.get(tag, {})
-        if isinstance(entry, dict):
-            pages = entry.get("pages", [])
-        elif isinstance(entry, list):
-            pages = entry
-        else:
-            pages = []
-        for p in pages:
+        for p in index.tags.get(tag, []):
             tagged.add(p)
     return sorted(tagged)
 
@@ -118,7 +93,7 @@ def _get_tagged_pages(index: dict, tags: list[str]) -> list[int]:
 def resolve_source_pages(
     source: SlideSource,
     total_slide_count: int,
-    index: dict | None = None,
+    index: PresentationIndex | None = None,
 ) -> list[int]:
     if source.tags:
         if index is None:

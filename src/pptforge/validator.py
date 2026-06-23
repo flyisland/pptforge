@@ -1,12 +1,11 @@
 import os
-import tomllib
 import zipfile
 from lxml import etree
 
 from pptforge.constants import REL_TYPES
 from pptforge.models import ProposalConfig
-from pptforge.config import resolve_source_pages, find_index_file, _get_tagged_pages
-from pptforge.extractor import _parse_notes_metadata, _compute_tags
+from pptforge.config import _get_tagged_pages
+from pptforge.extractor import _parse_notes_metadata, _compute_tags, extract_index
 
 
 class ValidationError(Exception):
@@ -68,20 +67,18 @@ def validate_content(proposal: ProposalConfig) -> list[str]:
                 slide_count = _get_slide_count(z)
                 index = None
                 if src.tags:
-                    idx_path = find_index_file(src.pptx_path)
-                    if idx_path is None:
+                    try:
+                        index = extract_index(src.pptx_path)
+                    except Exception as e:
                         errors.append(
-                            f"缺少 index 文件：{os.path.basename(src.pptx_path)}"
+                            f"无法读取 {os.path.basename(src.pptx_path)}：{e}"
                         )
                         continue
-                    with open(idx_path, "rb") as f:
-                        index = tomllib.load(f)
                     for tag in src.tags:
-                        tag_entry = index.get("tags", {}).get(tag)
-                        if tag_entry is None:
+                        if tag not in index.tags:
                             errors.append(
                                 f"tag \"{tag}\" 不在 "
-                                f"{os.path.basename(src.pptx_path)} 的 index 中"
+                                f"{os.path.basename(src.pptx_path)} 中"
                             )
 
                 if errors:

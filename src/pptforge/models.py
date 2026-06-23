@@ -24,6 +24,5 @@ class SlideMetadata:
 @dataclass
 class PresentationIndex:
     source_path: str
-    generated_at: str
     tags: dict[str, list[int]]
     pages: dict[int, SlideMetadata]
