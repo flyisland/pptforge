@@ -24,6 +24,7 @@ def _get_slide_paths(src_zip: zipfile.ZipFile) -> list[str]:
         if rel.get("Type") == slide_type:
             target = rel.get("Target")
             slides.append(f"ppt/{target}")
+    slides.sort(key=lambda p: int(p.replace("ppt/slides/slide", "").replace(".xml", "")))
     return slides
 
 
@@ -140,6 +141,27 @@ def _compute_tags(
     return tags_dict, pages_dict, errors
 
 
+def _find_notes_for_slide(
+    z: zipfile.ZipFile, slide_path: str
+) -> dict:
+    slide_name = os.path.splitext(os.path.basename(slide_path))[0]
+    rels_path = f"ppt/slides/_rels/{slide_name}.xml.rels"
+    if rels_path not in z.namelist():
+        return {}
+
+    rels_root = etree.fromstring(z.read(rels_path))
+    notes_type = REL_TYPES["notesSlide"]
+    for rel in rels_root:
+        if rel.get("Type") == notes_type:
+            notes_target = rel.get("Target", "")
+            notes_path = os.path.normpath(
+                os.path.join(os.path.dirname(slide_path), notes_target)
+            )
+            if notes_path in z.namelist():
+                return _parse_notes_metadata(z.read(notes_path))
+    return {}
+
+
 def extract_index(pptx_path: str) -> PresentationIndex:
     per_page_notes: dict[int, dict] = {}
 
@@ -147,12 +169,7 @@ def extract_index(pptx_path: str) -> PresentationIndex:
         slide_paths = _get_slide_paths(z)
         for i in range(len(slide_paths)):
             page_num = i + 1
-            per_page_notes[page_num] = {}
-
-            notes_path = f"ppt/notesSlides/notesSlide{i + 1}.xml"
-            if notes_path in z.namelist():
-                notes_data = z.read(notes_path)
-                per_page_notes[page_num] = _parse_notes_metadata(notes_data)
+            per_page_notes[page_num] = _find_notes_for_slide(z, slide_paths[i])
 
     tags_dict, pages, errors = _compute_tags(per_page_notes)
 

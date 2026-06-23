@@ -28,6 +28,7 @@ def _get_slide_paths(src_zip: zipfile.ZipFile) -> list[str]:
         if rel.get("Type") == slide_type:
             target = rel.get("Target")
             slides.append(f"ppt/{target}")
+    slides.sort(key=lambda p: int(p.replace("ppt/slides/slide", "").replace(".xml", "")))
     return slides
 
 
@@ -36,6 +37,7 @@ def _copy_skeleton(src_zip: zipfile.ZipFile, dst_zip: zipfile.ZipFile) -> None:
         "ppt/slides/",
         "ppt/notesSlides/",
         "ppt/media/",
+        "ppt/tags/",
         "ppt/presentation.xml",
         "ppt/_rels/presentation.xml.rels",
         "[Content_Types].xml",
@@ -52,6 +54,7 @@ def _register_slides(
     src_presentation_xml: bytes,
     slide_count: int,
     src_content_types_xml: bytes,
+    notes_slide_indices: set[int] | None = None,
 ) -> None:
     root = etree.fromstring(src_presentation_xml)
     sld_id_lst = root.find(f"{{{P_NS}}}sldIdLst")
@@ -71,6 +74,20 @@ def _register_slides(
     dst_zip.writestr("ppt/presentation.xml", presentation_xml)
 
     ct_root = etree.fromstring(src_content_types_xml)
+
+    to_remove = []
+    for child in ct_root:
+        if child.tag == f"{{{CONTENT_TYPES_NS}}}Override":
+            part_name = child.get("PartName", "")
+            if (
+                part_name.startswith("/ppt/slides/slide")
+                or part_name.startswith("/ppt/notesSlides/notesSlide")
+                or part_name.startswith("/ppt/tags/")
+            ):
+                to_remove.append(child)
+    for child in to_remove:
+        ct_root.remove(child)
+
     for i in range(1, slide_count + 1):
         slide_override = etree.SubElement(
             ct_root, f"{{{CONTENT_TYPES_NS}}}Override"
@@ -80,6 +97,17 @@ def _register_slides(
             "ContentType",
             "application/vnd.openxmlformats-officedocument.presentationml.slide+xml",
         )
+
+    if notes_slide_indices:
+        for i in sorted(notes_slide_indices):
+            notes_override = etree.SubElement(
+                ct_root, f"{{{CONTENT_TYPES_NS}}}Override"
+            )
+            notes_override.set("PartName", f"/ppt/notesSlides/notesSlide{i}.xml")
+            notes_override.set(
+                "ContentType",
+                "application/vnd.openxmlformats-officedocument.presentationml.notesSlide+xml",
+            )
 
     content_types_xml = etree.tostring(
         ct_root, xml_declaration=True, encoding="UTF-8", standalone=True
@@ -143,6 +171,7 @@ def merge(proposal: ProposalConfig) -> None:
                         all_slides.append((source.pptx_path, slide_paths[page_num - 1]))
 
             media_manager = MediaManager()
+            notes_slide_indices: set[int] = set()
 
             dst_slide_index = 1
             for src_path, src_slide_path in all_slides:
@@ -154,6 +183,7 @@ def merge(proposal: ProposalConfig) -> None:
                         media_manager=media_manager,
                         layout_manager=layout_manager,
                         dst_zip=dst_zip,
+                        notes_slide_indices=notes_slide_indices,
                     )
                 dst_slide_index += 1
 
@@ -168,6 +198,7 @@ def merge(proposal: ProposalConfig) -> None:
                 src_presentation_xml,
                 dst_slide_index - 1,
                 src_content_types_xml,
+                notes_slide_indices,
             )
             _rewrite_presentation_rels(
                 dst_zip,
@@ -189,10 +220,10 @@ def _copy_slide(
     media_manager: MediaManager,
     layout_manager: LayoutManager | None,
     dst_zip: zipfile.ZipFile,
+    notes_slide_indices: set[int] | None = None,
 ) -> None:
     slide_num = src_slide_path.split("/")[-1].replace("slide", "").replace(".xml", "")
     rels_path = f"ppt/slides/_rels/slide{slide_num}.xml.rels"
-    notes_path = f"ppt/notesSlides/notesSlide{slide_num}.xml"
 
     target_mapping = {}
 
@@ -223,6 +254,18 @@ def _copy_slide(
                 if not new_target.startswith("../"):
                     new_target = "../" + new_target
                 target_mapping[old_target] = new_target
+            elif rel_type == REL_TYPES["notesSlide"]:
+                src_notes_path = os.path.normpath(
+                    os.path.join(os.path.dirname(src_slide_path), old_target)
+                )
+                if src_notes_path in src_zip.namelist():
+                    notes_data = src_zip.read(src_notes_path)
+                    dst_notes_path = f"ppt/notesSlides/notesSlide{dst_slide_index}.xml"
+                    dst_zip.writestr(dst_notes_path, notes_data)
+                    if notes_slide_indices is not None:
+                        notes_slide_indices.add(dst_slide_index)
+                    new_target = f"../notesSlides/notesSlide{dst_slide_index}.xml"
+                    target_mapping[old_target] = new_target
 
         if target_mapping:
             for rel in root:
@@ -232,6 +275,11 @@ def _copy_slide(
             rels_data = etree.tostring(
                 root, xml_declaration=True, encoding="UTF-8", standalone=True
             )
+    else:
+        rels_data = (
+            b'<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+            b'<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"/>'
+        )
 
     dst_rels_path = f"ppt/slides/_rels/slide{dst_slide_index}.xml.rels"
     dst_zip.writestr(dst_rels_path, rels_data)
@@ -239,8 +287,3 @@ def _copy_slide(
     slide_data = src_zip.read(src_slide_path)
     dst_slide_path = f"ppt/slides/slide{dst_slide_index}.xml"
     dst_zip.writestr(dst_slide_path, slide_data)
-
-    if notes_path in src_zip.namelist():
-        notes_data = src_zip.read(notes_path)
-        dst_notes_path = f"ppt/notesSlides/notesSlide{dst_slide_index}.xml"
-        dst_zip.writestr(dst_notes_path, notes_data)
