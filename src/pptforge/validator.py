@@ -1,9 +1,12 @@
 import os
+import tomllib
 import zipfile
 from lxml import etree
 
-from pptforge.models import ProposalConfig, SlideSource
 from pptforge.constants import REL_TYPES
+from pptforge.models import ProposalConfig
+from pptforge.config import resolve_source_pages, find_index_file, _get_tagged_pages
+from pptforge.extractor import _parse_notes_metadata, _compute_tags
 
 
 class ValidationError(Exception):
@@ -12,6 +15,13 @@ class ValidationError(Exception):
 
     def __str__(self):
         return "\n".join(f"✗ {e}" for e in self.errors)
+
+
+def _get_slide_count(src_zip: zipfile.ZipFile) -> int:
+    rels_xml = src_zip.read("ppt/_rels/presentation.xml.rels")
+    root = etree.fromstring(rels_xml)
+    slide_type = REL_TYPES["slide"]
+    return sum(1 for rel in root if rel.get("Type") == slide_type)
 
 
 def validate_static(proposal: ProposalConfig, force: bool = False) -> None:
@@ -35,21 +45,13 @@ def validate_static(proposal: ProposalConfig, force: bool = False) -> None:
         elif not src.pptx_path.lower().endswith(".pptx"):
             errors.append(f"文件不是 .pptx 格式：{src.pptx_path}")
 
-        for page in src.pages:
-            if page < 1:
-                errors.append(
-                    f"页码必须为正整数：{src.pptx_path} 请求了第 {page} 页"
-                )
+        if src.tags:
+            for tag in src.tags:
+                if not tag:
+                    errors.append(f"tag 名为空：{src.pptx_path}")
 
     if errors:
         raise ValidationError(errors)
-
-
-def _get_slide_count(src_zip: zipfile.ZipFile) -> int:
-    rels_xml = src_zip.read("ppt/_rels/presentation.xml.rels")
-    root = etree.fromstring(rels_xml)
-    slide_type = REL_TYPES["slide"]
-    return sum(1 for rel in root if rel.get("Type") == slide_type)
 
 
 def validate_content(proposal: ProposalConfig) -> list[str]:
@@ -64,12 +66,46 @@ def validate_content(proposal: ProposalConfig) -> list[str]:
                     continue
 
                 slide_count = _get_slide_count(z)
-                for page in src.pages:
-                    if page > slide_count:
+                index = None
+                if src.tags:
+                    idx_path = find_index_file(src.pptx_path)
+                    if idx_path is None:
                         errors.append(
-                            f"页码越界：{os.path.basename(src.pptx_path)} "
-                            f"共 {slide_count} 页，请求了第 {page} 页"
+                            f"缺少 index 文件：{os.path.basename(src.pptx_path)}"
                         )
+                        continue
+                    with open(idx_path, "rb") as f:
+                        index = tomllib.load(f)
+                    for tag in src.tags:
+                        tag_entry = index.get("tags", {}).get(tag)
+                        if tag_entry is None:
+                            errors.append(
+                                f"tag \"{tag}\" 不在 "
+                                f"{os.path.basename(src.pptx_path)} 的 index 中"
+                            )
+
+                if errors:
+                    continue
+
+                if src.tags:
+                    base_count = len(_get_tagged_pages(index, src.tags)) if index else 0
+                else:
+                    base_count = slide_count
+
+                if src.pages is not None:
+                    for spec in src.pages:
+                        if spec > 0:
+                            if spec > base_count:
+                                errors.append(
+                                    f"页码越界：{os.path.basename(src.pptx_path)} "
+                                    f"共 {base_count} 页，请求了第 {spec} 页"
+                                )
+                        else:
+                            if abs(spec) > base_count:
+                                errors.append(
+                                    f"页码越界：{os.path.basename(src.pptx_path)} "
+                                    f"共 {base_count} 页，请求了第 {spec} 页"
+                                )
         except (zipfile.BadZipFile, Exception) as e:
             errors.append(f"无法打开文件 {src.pptx_path}：{e}")
 
@@ -77,3 +113,25 @@ def validate_content(proposal: ProposalConfig) -> list[str]:
         raise ValidationError(errors)
 
     return warnings
+
+
+def validate_tags_in_pptx(pptx_path: str) -> list[str]:
+    errors = []
+    per_page_notes: dict[int, dict] = {}
+
+    try:
+        with zipfile.ZipFile(pptx_path, "r") as z:
+            slide_count = _get_slide_count(z)
+            for i in range(slide_count):
+                page_num = i + 1
+                notes_path = f"ppt/notesSlides/notesSlide{i + 1}.xml"
+                if notes_path in z.namelist():
+                    notes_data = z.read(notes_path)
+                    per_page_notes[page_num] = _parse_notes_metadata(notes_data)
+                else:
+                    per_page_notes[page_num] = {}
+    except Exception as e:
+        return [f"无法读取 {os.path.basename(pptx_path)}：{e}"]
+
+    _, _, compute_errors = _compute_tags(per_page_notes)
+    return compute_errors

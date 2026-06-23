@@ -7,7 +7,7 @@ def test_slide_with_images(tmp_path):
     output = str(tmp_path / "output.pptx")
     proposal = ProposalConfig(
         output_path=output,
-        sources=[SlideSource("tests/fixtures/with_images.pptx", [1])]
+        sources=[SlideSource(pptx_path="tests/fixtures/with_images.pptx", pages=[1])]
     )
     merge(proposal)
 
@@ -20,7 +20,7 @@ def test_image_dedup_across_slides(tmp_path):
     output = str(tmp_path / "output.pptx")
     proposal = ProposalConfig(
         output_path=output,
-        sources=[SlideSource("tests/fixtures/dup_images.pptx", [1, 2])]
+        sources=[SlideSource(pptx_path="tests/fixtures/dup_images.pptx", pages=[1, 2])]
     )
     merge(proposal)
 

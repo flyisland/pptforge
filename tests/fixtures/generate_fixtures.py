@@ -561,9 +561,9 @@ def create_with_metadata_pptx(path: str):
         z.writestr("ppt/presProps.xml", make_pres_props_xml())
 
         notes = [
-            "@section: CI/CD\n@feature: Pipeline\n@tags: devops, 自动化\n@status: stable\n@owner: 张三\n---\n备注内容",
-            "@section: CI/CD\n@feature: Runner\n@status: stable\n---\n第二页备注",
-            "@status: deprecated\n@owner: 李四\n---\n过时了",
+            "@tags: devops, 自动化\n@tag-start: Pipeline\n---\n备注内容",
+            "@tags: 重点\n---\n第二页备注",
+            "@tag-end: Pipeline\n---\n过时了",
         ]
         for i, note_text in enumerate(notes, 1):
             z.writestr(f"ppt/slides/slide{i}.xml", make_slide_with_image_xml("rId2"))

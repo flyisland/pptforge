@@ -8,8 +8,8 @@ def test_multi_master_merge(tmp_path):
     proposal = ProposalConfig(
         output_path=output,
         sources=[
-            SlideSource("tests/fixtures/master_a.pptx", [1]),
-            SlideSource("tests/fixtures/master_b.pptx", [1]),
+            SlideSource(pptx_path="tests/fixtures/master_a.pptx", pages=[1]),
+            SlideSource(pptx_path="tests/fixtures/master_b.pptx", pages=[1]),
         ]
     )
     merge(proposal)

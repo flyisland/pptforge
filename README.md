@@ -29,7 +29,7 @@ cases_fin  = "/shared/slides/cases/金融行业/cases_fin.pptx"
 
 ### 2. Scan metadata (optional)
 
-Index slide notes to enable section/feature-based page selection:
+Index slide notes to enable tag-based page selection:
 
 ```bash
 pptforge index path/to/source.pptx
@@ -48,21 +48,23 @@ meta:
 output: ./output/客户A_20240715.pptx
 
 slides:
-  - source: gitlab
-    section: 项目管理
-
-  - source: gitlab
-    feature: Pipeline
-
-  - source: cases_fin
-    pages: [3, 5]
-
-  - source: kubernetes
-    pages: "3-7"
-
-  - source: ./临时/定制页.pptx
-    pages: all
+  - gitlab[CI/CD]
+  - gitlab[CI/CD, Pipeline]:1-3
+  - gitlab[CI/CD]:-1
+  - cases_fin:3, 5
+  - kubernetes:3-7
+  - ./临时/定制页.pptx
 ```
+
+**Source expression syntax**: `source[tag1, tag2, ...]:range1, range2, ...`
+
+| Part | Required | Description |
+|------|----------|-------------|
+| `source` | ✅ | File alias (from `config.toml`) or file path |
+| `[tags]` | Optional | Comma-separated tag filter (union) |
+| `:pages` | Optional | Comma-separated page specs, 1-based relative to filtered set |
+
+Page spec supports negatives for relative positioning: `-1` = last page, `-3--1` = last 3 pages.
 
 ### 4. Build
 
@@ -75,24 +77,26 @@ pptforge build proposal.yaml --force
 | Command | Description |
 |---------|-------------|
 | `pptforge index <file.pptx>` | Scan notes metadata, generate `.index.toml` |
-| `pptforge list <file.pptx>` | List named sections and features |
+| `pptforge list <file.pptx>` | List tag ranges and per-page tags |
 | `pptforge build <proposal.yaml>` | Build new PPTX from proposal |
 | `pptforge lint <directory>` | Validate all PPTX files in a directory |
 | `pptforge outdated <proposal.yaml>` | Check if source files have been updated |
 
 ## Slide Notes Metadata
 
-Add structured metadata to slide notes for section/feature-based selection:
+Add tags to slide notes for tag-based page selection. Supports three markers:
 
 ```
-@section: CI/CD
-@feature: Pipeline
-@tags: devops, 自动化
-@status: stable
-@owner: 张三
----
-演讲者备注写在这里
+@tags: Pipeline, 重点功能
+@tag-start: CI/CD
+@tag-end: CI/CD
 ```
+
+- `@tags` — single-page tags (comma-separated)
+- `@tag-start` / `@tag-end` — range tags (supports nesting and crossing)
+- All other `@`-prefixed fields are ignored
+
+Tag ranges are computed by pairing start/end markers. Unpaired `@tag-start` auto-terminates preceding unclosed ranges. Unclosed ranges at end of file trigger an error.
 
 ## How It Works
 

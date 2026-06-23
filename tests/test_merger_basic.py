@@ -7,7 +7,7 @@ def test_single_file_two_pages(tmp_path):
     output = str(tmp_path / "output.pptx")
     proposal = ProposalConfig(
         output_path=output,
-        sources=[SlideSource("tests/fixtures/simple.pptx", [1, 3])]
+        sources=[SlideSource(pptx_path="tests/fixtures/simple.pptx", pages=[1, 3])]
     )
     merge(proposal)
 
@@ -25,7 +25,7 @@ def test_no_tmp_file_on_success(tmp_path):
     output = str(tmp_path / "output.pptx")
     proposal = ProposalConfig(
         output_path=output,
-        sources=[SlideSource("tests/fixtures/simple.pptx", [1])]
+        sources=[SlideSource(pptx_path="tests/fixtures/simple.pptx", pages=[1])]
     )
     merge(proposal)
     assert not (tmp_path / "output.pptx.tmp").exists()

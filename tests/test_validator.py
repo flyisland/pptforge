@@ -6,7 +6,7 @@ from pptforge.models import ProposalConfig, SlideSource
 def test_missing_file_reported():
     proposal = ProposalConfig(
         output_path="/tmp/out.pptx",
-        sources=[SlideSource("/nonexistent/file.pptx", [1])]
+        sources=[SlideSource(pptx_path="/nonexistent/file.pptx", pages=[1])]
     )
     with pytest.raises(ValidationError) as exc:
         validate_static(proposal)
@@ -16,7 +16,7 @@ def test_missing_file_reported():
 def test_page_out_of_range():
     proposal = ProposalConfig(
         output_path="/tmp/out.pptx",
-        sources=[SlideSource("tests/fixtures/simple.pptx", [999])]
+        sources=[SlideSource(pptx_path="tests/fixtures/simple.pptx", pages=[999])]
     )
     with pytest.raises(ValidationError) as exc:
         validate_content(proposal)
@@ -27,8 +27,8 @@ def test_all_errors_collected():
     proposal = ProposalConfig(
         output_path="/tmp/out.pptx",
         sources=[
-            SlideSource("/missing_a.pptx", [1]),
-            SlideSource("/missing_b.pptx", [1]),
+            SlideSource(pptx_path="/missing_a.pptx", pages=[1]),
+            SlideSource(pptx_path="/missing_b.pptx", pages=[1]),
         ]
     )
     with pytest.raises(ValidationError) as exc:

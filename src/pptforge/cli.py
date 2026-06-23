@@ -10,7 +10,7 @@ from rich.table import Table
 from pptforge.config import load_global_config, load_proposal
 from pptforge.validator import validate_static, validate_content, ValidationError
 from pptforge.merger import merge
-from pptforge.extractor import extract_index, write_index_toml
+from pptforge.extractor import extract_index, write_index_toml, ExtractError
 from pptforge.constants import REL_TYPES
 from pptforge.config import find_index_file
 
@@ -50,11 +50,8 @@ def build(
 
         merge(proposal)
 
-        slide_count = sum(
-            1 for s in proposal.sources for p in s.pages if isinstance(p, int) and p > 0
-        )
         console.print(
-            f"✓ 已生成：{proposal.output_path}（共 {slide_count} 页）"
+            f"✓ 已生成：{proposal.output_path}"
         )
 
     except Exception as e:
@@ -85,7 +82,7 @@ def index(
 def list(
     pptx_path: str = typer.Argument(..., help="PPTX 文件路径"),
 ):
-    """列出 PPTX 的所有命名章节和特性"""
+    """列出 PPTX 所有 tag 范围"""
     if not os.path.exists(pptx_path):
         console.print(f"✗ 文件不存在：{pptx_path}")
         raise typer.Exit(1)
@@ -93,29 +90,27 @@ def list(
     try:
         result = extract_index(pptx_path)
 
-        if result.sections:
-            table = Table(title="章节")
-            table.add_column("章节名", style="cyan")
+        if result.tags:
+            table = Table(title="Tags")
+            table.add_column("Tag", style="cyan")
             table.add_column("页码", style="green")
-            for name, pages in result.sections.items():
+            for name in sorted(result.tags):
+                pages = result.tags[name]
                 table.add_row(name, ", ".join(str(p) for p in pages))
             console.print(table)
 
-        if result.features:
-            table = Table(title="特性")
-            table.add_column("特性名", style="cyan")
-            table.add_column("页码", style="green")
-            table.add_column("所属章节", style="yellow")
-            for name, info in result.features.items():
-                table.add_row(
-                    name,
-                    ", ".join(str(p) for p in info["pages"]),
-                    info.get("section", ""),
-                )
+        if result.pages:
+            table = Table(title="每页 Tags")
+            table.add_column("页码", style="cyan")
+            table.add_column("Tags", style="green")
+            for num in sorted(result.pages):
+                meta = result.pages[num]
+                tag_str = ", ".join(meta.tags) if meta.tags else "（无）"
+                table.add_row(str(num), tag_str)
             console.print(table)
 
-        if not result.sections and not result.features:
-            console.print("未找到命名章节或特性（备注中未设置 @section/@feature）")
+        if not result.tags:
+            console.print("备注中未设置任何 @tags / @tag-start / @tag-end")
     except Exception as e:
         console.print(f"✗ 读取失败：{e}")
         raise typer.Exit(1)
@@ -173,13 +168,14 @@ def lint(
         try:
             result = extract_index(fpath)
             for page_num, meta in result.pages.items():
-                if meta.status == "deprecated":
-                    owner_info = f"（owner: {meta.owner}）" if meta.owner else ""
-                    warnings.append(
-                        f"{rel_name} 第 {page_num} 页标记为 deprecated{owner_info}"
-                    )
+                if meta.tags:
+                    pass
+        except ExtractError as e:
+            for err in e.errors:
+                errors.append(f"{rel_name}：{err}")
+            continue
         except Exception:
-            errors.append(f"{rel_name}：读取 metadata 失败")
+            errors.append(f"{rel_name}：metadata 格式错误")
             continue
 
     for e in errors:

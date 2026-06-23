@@ -22,9 +22,9 @@ src/pptforge/
 ├── merger.py          # Core merge logic, slide copying, ZIP manipulation
 ├── layout_manager.py  # SlideLayout/SlideMaster migration across source files
 ├── media.py           # MediaManager: hash-based dedup, sequential naming
-├── extractor.py       # Index scanner: reads notes metadata, writes .index.toml
-├── validator.py       # Two-phase validation (static + content)
-├── config.py          # Config file I/O (TOML global config, YAML proposal)
+├── extractor.py       # Index scanner: tag parsing + range computation, writes .index.toml
+├── validator.py       # Two-phase validation (static + content), tag validation
+├── config.py          # Config I/O, source expression parser, page spec resolver
 ├── models.py          # Dataclasses: SlideSource, ProposalConfig, SlideMetadata, PresentationIndex
 └── constants.py       # XML namespace URIs, relationship type constants, media MIME types
 ```
@@ -36,6 +36,8 @@ src/pptforge/
 - **rId scope**: rId values are scoped per-file; only `presentation.xml.rels` needs global rId allocation for slides
 - **Temp file strategy**: write to `output.pptx.tmp`, then `os.replace()` for atomic final write; delete `.tmp` on failure
 - **Validate before write**: all checks pass before any file is written to the output
+- **Source expression**: proposal uses strings like `gitlab[CI/CD]:1-3, 5` parsed by `config.parse_source_expr()`
+- **Tag resolution**: merger calls `config.resolve_source_pages()` → read index → filter by tag → resolve negatives
 
 ## Common Pitfalls
 
@@ -43,6 +45,8 @@ src/pptforge/
 2. Content-Types: every new slide, notes slide, layout, master, and media extension must be registered in `[Content_Types].xml`.
 3. Duplicate names: don't let `_copy_skeleton` copy files that are later overwritten (`presentation.xml`, `presentation.xml.rels`, `[Content_Types].xml`).
 4. Circular imports: shared constants live in `constants.py`, not in `merger.py` or `layout_manager.py`.
+5. **Negative page parsing**: `-3--1` is parsed as range[-3, -1]; the right side after `--` is implicitly negated — do NOT use `str.split("--")` alone.
+6. **Tag/index dependency**: tag-filtered sources require `.index.toml`; merger and validator both call `find_index_file()` before `resolve_source_pages()`. Missing index = extractor error at build time.
 
 ## Commands
 

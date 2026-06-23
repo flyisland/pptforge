@@ -4,7 +4,8 @@ from dataclasses import dataclass, field
 @dataclass
 class SlideSource:
     pptx_path: str
-    pages: list[int | str]
+    tags: list[str] = field(default_factory=list)
+    pages: list[int] | None = None
 
 
 @dataclass
@@ -17,17 +18,12 @@ class ProposalConfig:
 @dataclass
 class SlideMetadata:
     page: int
-    section: str | None = None
-    feature: str | None = None
     tags: list[str] = field(default_factory=list)
-    status: str = "stable"
-    owner: str | None = None
 
 
 @dataclass
 class PresentationIndex:
     source_path: str
     generated_at: str
-    sections: dict[str, list[int]]
-    features: dict[str, dict]
+    tags: dict[str, list[int]]
     pages: dict[int, SlideMetadata]

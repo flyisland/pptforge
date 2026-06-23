@@ -7,6 +7,10 @@ import yaml
 from pptforge.models import ProposalConfig, SlideSource
 
 
+class ParseError(ValueError):
+    pass
+
+
 def load_global_config() -> dict:
     config_path = Path.home() / ".pptforge" / "config.toml"
     if not config_path.exists():
@@ -15,18 +19,68 @@ def load_global_config() -> dict:
         return tomllib.load(f)
 
 
-def _parse_pages(value) -> list[int | str]:
-    if isinstance(value, list):
-        return [int(p) for p in value]
-    if isinstance(value, str):
-        value = value.strip()
-        if value == "all":
-            return [-1]
-        if "-" in value:
-            parts = value.split("-")
-            start, end = int(parts[0]), int(parts[1])
-            return list(range(start, end + 1))
-    return []
+def _parse_page_expr(expr: str) -> list[int]:
+    parts = [p.strip() for p in expr.split(",")]
+    result = []
+    for part in parts:
+        if not part:
+            continue
+        if part.startswith("-"):
+            inner = part[1:]
+            double_idx = inner.find("--")
+            if double_idx != -1:
+                left = part[:double_idx + 1]
+                right_val = inner[double_idx + 2:]
+                start = int(left)
+                end = -int(right_val)
+                if start > end:
+                    raise ParseError(f"范围起始大于结束：{part}")
+                result.extend(range(start, end + 1))
+            elif "-" in inner:
+                raise ParseError(f"无效的页码表达式：{part}")
+            else:
+                result.append(int(part))
+        elif "-" in part[1:]:
+            idx = part.index("-", 1)
+            start = int(part[:idx])
+            end = int(part[idx + 1:])
+            if start > end:
+                raise ParseError(f"范围起始大于结束：{part}")
+            result.extend(range(start, end + 1))
+        else:
+            result.append(int(part))
+    return result
+
+
+def parse_source_expr(expr: str) -> SlideSource:
+    tags: list[str] = []
+    page_expr: str | None = None
+
+    tag_start = expr.find("[")
+    if tag_start != -1:
+        tag_end = expr.find("]", tag_start)
+        if tag_end == -1:
+            raise ParseError(f"缺少 ]：{expr}")
+        tag_str = expr[tag_start + 1:tag_end]
+        tags = [t.strip() for t in tag_str.split(",") if t.strip()]
+        source_part = expr[:tag_start]
+        remaining = expr[tag_end + 1:]
+        if remaining:
+            if remaining[0] == ":":
+                page_expr = remaining[1:]
+            else:
+                raise ParseError(f"标签后出现意外字符：{remaining}")
+    else:
+        colon_idx = expr.find(":")
+        if colon_idx != -1:
+            source_part = expr[:colon_idx]
+            page_expr = expr[colon_idx + 1:]
+        else:
+            source_part = expr
+
+    pages = _parse_page_expr(page_expr) if page_expr else None
+
+    return SlideSource(pptx_path=source_part, tags=tags, pages=pages)
 
 
 def _load_index_toml(index_path: str) -> dict | None:
@@ -37,30 +91,61 @@ def _load_index_toml(index_path: str) -> dict | None:
         return None
 
 
-def _resolve_section_pages(pptx_path: str, section_name: str) -> list[int] | None:
-    index_path = find_index_file(pptx_path)
-    if index_path is None:
-        return None
-    index = _load_index_toml(index_path)
-    if index is None:
-        return None
-    sections = index.get("sections", {})
-    if section_name in sections:
-        return sections[section_name]
+def find_index_file(pptx_path: str) -> str | None:
+    base = os.path.splitext(pptx_path)[0]
+    index_path = base + ".index.toml"
+    if os.path.exists(index_path):
+        return index_path
     return None
 
 
-def _resolve_feature_pages(pptx_path: str, feature_name: str) -> list[int] | None:
-    index_path = find_index_file(pptx_path)
-    if index_path is None:
-        return None
-    index = _load_index_toml(index_path)
-    if index is None:
-        return None
-    features = index.get("features", {})
-    if feature_name in features:
-        return features[feature_name].get("pages", [])
-    return None
+def _get_tagged_pages(index: dict, tags: list[str]) -> list[int]:
+    tagged: set[int] = set()
+    tag_index = index.get("tags", {})
+    for tag in tags:
+        entry = tag_index.get(tag, {})
+        if isinstance(entry, dict):
+            pages = entry.get("pages", [])
+        elif isinstance(entry, list):
+            pages = entry
+        else:
+            pages = []
+        for p in pages:
+            tagged.add(p)
+    return sorted(tagged)
+
+
+def resolve_source_pages(
+    source: SlideSource,
+    total_slide_count: int,
+    index: dict | None = None,
+) -> list[int]:
+    if source.tags:
+        if index is None:
+            raise ValueError(
+                f"需要 index 文件来解析 tag 筛选：{source.pptx_path}"
+            )
+        base = _get_tagged_pages(index, source.tags)
+        if not base:
+            return []
+    else:
+        base = list(range(1, total_slide_count + 1))
+
+    if source.pages is None:
+        return base
+
+    n = len(base)
+    resolved = []
+    for spec in source.pages:
+        if spec > 0:
+            if spec <= n:
+                resolved.append(base[spec - 1])
+        else:
+            abs_idx = n + spec
+            if abs_idx >= 0:
+                resolved.append(base[abs_idx])
+
+    return sorted(set(resolved))
 
 
 def load_proposal(path: str, global_config: dict) -> ProposalConfig:
@@ -79,7 +164,12 @@ def load_proposal(path: str, global_config: dict) -> ProposalConfig:
 
     sources = []
     for item in data.get("slides", []):
-        source_key = item.get("source", "")
+        if not isinstance(item, str):
+            raise ParseError(f"slides 条目必须是表达式字符串，得到 {type(item).__name__}")
+
+        slide_source = parse_source_expr(item)
+
+        source_key = slide_source.pptx_path
         if source_key in sources_dict:
             pptx_path = sources_dict[source_key]
         else:
@@ -89,35 +179,16 @@ def load_proposal(path: str, global_config: dict) -> ProposalConfig:
             )
         pptx_path = os.path.abspath(pptx_path)
 
-        if "pages" in item:
-            pages = _parse_pages(item["pages"])
-        elif "section" in item:
-            resolved = _resolve_section_pages(pptx_path, item["section"])
-            if resolved is not None:
-                pages = resolved
-            else:
-                pages = [item["section"]]
-        elif "feature" in item:
-            resolved = _resolve_feature_pages(pptx_path, item["feature"])
-            if resolved is not None:
-                pages = resolved
-            else:
-                pages = [item["feature"]]
-        else:
-            pages = [-1]
-
-        sources.append(SlideSource(pptx_path=pptx_path, pages=pages))
+        sources.append(
+            SlideSource(
+                pptx_path=pptx_path,
+                tags=slide_source.tags,
+                pages=slide_source.pages,
+            )
+        )
 
     return ProposalConfig(
         output_path=output_path,
         sources=sources,
         meta=meta,
     )
-
-
-def find_index_file(pptx_path: str) -> str | None:
-    base = os.path.splitext(pptx_path)[0]
-    index_path = base + ".index.toml"
-    if os.path.exists(index_path):
-        return index_path
-    return None
