@@ -38,6 +38,8 @@ def _copy_skeleton(src_zip: zipfile.ZipFile, dst_zip: zipfile.ZipFile) -> None:
         "ppt/notesSlides/",
         "ppt/media/",
         "ppt/tags/",
+        "ppt/slideLayouts/_rels/",
+        "ppt/slideMasters/_rels/",
         "ppt/presentation.xml",
         "ppt/_rels/presentation.xml.rels",
         "[Content_Types].xml",
@@ -144,6 +146,7 @@ def merge(proposal: ProposalConfig) -> None:
     tmp_path = proposal.output_path + ".tmp"
     try:
         with zipfile.ZipFile(tmp_path, "w", zipfile.ZIP_DEFLATED) as dst_zip:
+            media_manager = MediaManager()
             src = proposal.sources[0]
             with zipfile.ZipFile(src.pptx_path, "r") as src_zip:
                 _copy_skeleton(src_zip, dst_zip)
@@ -152,7 +155,7 @@ def merge(proposal: ProposalConfig) -> None:
                     "ppt/_rels/presentation.xml.rels"
                 )
                 src_content_types_xml = src_zip.read("[Content_Types].xml")
-                layout_manager = LayoutManager(src_zip)
+                layout_manager = LayoutManager(src_zip, media_manager)
 
             all_slides = []
             for source in proposal.sources:
@@ -170,7 +173,7 @@ def merge(proposal: ProposalConfig) -> None:
                     for page_num in resolved_pages:
                         all_slides.append((source.pptx_path, slide_paths[page_num - 1]))
 
-            media_manager = MediaManager()
+
             notes_slide_indices: set[int] = set()
 
             dst_slide_index = 1
@@ -186,6 +189,21 @@ def merge(proposal: ProposalConfig) -> None:
                         notes_slide_indices=notes_slide_indices,
                     )
                 dst_slide_index += 1
+
+            # Ensure master and all referenced layouts are fully processed
+            pres_root = etree.fromstring(src_presentation_xml)
+            master_id_lst = pres_root.find(f"{{{P_NS}}}sldMasterIdLst")
+            if master_id_lst is not None:
+                pres_rels_root = etree.fromstring(src_presentation_rels)
+                for master_id in master_id_lst:
+                    r_id = master_id.get(f"{{{R_NS}}}id")
+                    for rel in pres_rels_root:
+                        if rel.get("Id") == r_id:
+                            master_target = rel.get("Target")
+                            master_path = os.path.normpath(f"ppt/{master_target}")
+                            with zipfile.ZipFile(proposal.sources[0].pptx_path, "r") as sz:
+                                layout_manager.ensure_master(sz, master_path)
+                            break
 
             for name, content in media_manager.files.items():
                 dst_zip.writestr(f"ppt/media/{name}", content)
