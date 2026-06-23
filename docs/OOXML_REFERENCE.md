@@ -46,6 +46,12 @@
   ContentType="application/vnd.openxmlformats-officedocument.presentationml.notesSlide+xml"/>
 ```
 
+若 slide 引用了 tag 文件，追加：
+```xml
+<Override PartName="/ppt/tags/tagN_xxx.xml"
+  ContentType="application/vnd.openxmlformats-officedocument.presentationml.tags+xml"/>
+```
+
 迁移新的 slideLayout 时，追加：
 ```xml
 <Override PartName="/ppt/slideLayouts/slideLayoutN.xml"
@@ -148,6 +154,9 @@ http://schemas.openxmlformats.org/officeDocument/2006/relationships/slide
 
 需要在多母版场景下修改 Target 的类型：
 - `.../slideLayout`（当 layout 被迁移到新路径时）
+
+需要复制文件并改写 Target 的类型：
+- `.../tags`（tag XML 被重命名后复制到 `ppt/tags/` 目录）
 
 绝对不修改的类型：
 - `.../hyperlink`（外部链接，Target 是 URL）
@@ -323,6 +332,7 @@ REL_TYPES = {
     "hyperlink":    f"{_BASE}/hyperlink",
     "theme":        f"{_BASE}/theme",
     "notesSlide":   f"{_BASE}/notesSlide",
+    "tags":         f"{_BASE}/tags",
     "presProps":    f"{_BASE}/presProps",
 }
 
