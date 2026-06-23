@@ -80,7 +80,7 @@ def info(
 ):
     """查看 PPTX 的 tag 信息，报告配对错误"""
     if not os.path.exists(pptx_path):
-        console.print(f"✗ 文件不存在：{pptx_path}")
+        console.print(f"✗ 文件不存在：\"{pptx_path}\"")
         raise typer.Exit(1)
 
     try:
@@ -90,7 +90,7 @@ def info(
         slide_count = 0
         if result.pages:
             slide_count = max(result.pages.keys())
-        console.print(f"{os.path.basename(pptx_path)}（共 {slide_count} 页）\n")
+        console.print(f"\"{pptx_path}\"（共 {slide_count} 页）\n")
 
         if result.tags:
             t = Table(title="Tags")

@@ -40,14 +40,14 @@ def validate_static(proposal: ProposalConfig, force: bool = False) -> None:
 
     for src in proposal.sources:
         if not os.path.exists(src.pptx_path):
-            errors.append(f"文件不存在：{src.pptx_path}")
+            errors.append(f"文件不存在：\"{src.pptx_path}\"")
         elif not src.pptx_path.lower().endswith(".pptx"):
-            errors.append(f"文件不是 .pptx 格式：{src.pptx_path}")
+            errors.append(f"文件不是 .pptx 格式：\"{src.pptx_path}\"")
 
         if src.tags:
             for tag in src.tags:
                 if not tag:
-                    errors.append(f"tag 名为空：{src.pptx_path}")
+                    errors.append(f"tag 名为空：\"{src.pptx_path}\"")
 
     if errors:
         raise ValidationError(errors)
@@ -61,7 +61,7 @@ def validate_content(proposal: ProposalConfig) -> list[str]:
         try:
             with zipfile.ZipFile(src.pptx_path, "r") as z:
                 if "ppt/presentation.xml" not in z.namelist():
-                    errors.append(f"不是有效的 PPTX 文件：{src.pptx_path}")
+                    errors.append(f"不是有效的 PPTX 文件：\"{src.pptx_path}\"")
                     continue
 
                 slide_count = _get_slide_count(z)
@@ -71,14 +71,14 @@ def validate_content(proposal: ProposalConfig) -> list[str]:
                         index = extract_index(src.pptx_path)
                     except Exception as e:
                         errors.append(
-                            f"无法读取 {os.path.basename(src.pptx_path)}：{e}"
+                            f"无法读取 \"{src.pptx_path}\"：{e}"
                         )
                         continue
                     for tag in src.tags:
                         if tag not in index.tags:
                             errors.append(
                                 f"tag \"{tag}\" 不在 "
-                                f"{os.path.basename(src.pptx_path)} 中"
+                                f"\"{src.pptx_path}\" 中"
                             )
 
                 if errors:
@@ -94,17 +94,17 @@ def validate_content(proposal: ProposalConfig) -> list[str]:
                         if spec > 0:
                             if spec > base_count:
                                 errors.append(
-                                    f"页码越界：{os.path.basename(src.pptx_path)} "
+                                    f"页码越界：\"{src.pptx_path}\" "
                                     f"共 {base_count} 页，请求了第 {spec} 页"
                                 )
                         else:
                             if abs(spec) > base_count:
                                 errors.append(
-                                    f"页码越界：{os.path.basename(src.pptx_path)} "
+                                    f"页码越界：\"{src.pptx_path}\" "
                                     f"共 {base_count} 页，请求了第 {spec} 页"
                                 )
         except (zipfile.BadZipFile, Exception) as e:
-            errors.append(f"无法打开文件 {src.pptx_path}：{e}")
+            errors.append(f"无法打开文件 \"{src.pptx_path}\"：{e}")
 
     if errors:
         raise ValidationError(errors)
@@ -128,7 +128,7 @@ def validate_tags_in_pptx(pptx_path: str) -> list[str]:
                 else:
                     per_page_notes[page_num] = {}
     except Exception as e:
-        return [f"无法读取 {os.path.basename(pptx_path)}：{e}"]
+        return [f"无法读取 \"{pptx_path}\"：{e}"]
 
     _, _, compute_errors = _compute_tags(per_page_notes)
     return compute_errors
