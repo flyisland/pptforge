@@ -1,0 +1,26 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "pptforge"
+version = "0.1.0"
+description = "PPTX slide extractor and composer for sales teams"
+requires-python = ">=3.11"
+dependencies = [
+    "lxml>=4.9",
+    "pyyaml>=6.0",
+    "typer>=0.9",
+    "rich>=13.0",
+]
+
+[project.scripts]
+pptforge = "pptforge.cli:app"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/pptforge"]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0",
+]

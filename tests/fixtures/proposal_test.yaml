@@ -1,0 +1,11 @@
+meta:
+  client: TestClient
+  date: 2024-07-15
+  author: Test
+  purpose: Testing
+
+output: ./output/test_output.pptx
+
+slides:
+  - source: ./simple.pptx
+    pages: [1, 3]
