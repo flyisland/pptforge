@@ -16,6 +16,7 @@ REL_TYPES = {
     "hyperlink": f"{_BASE}/hyperlink",
     "theme": f"{_BASE}/theme",
     "notesSlide": f"{_BASE}/notesSlide",
+    "tags": f"{_BASE}/tags",
     "presProps": f"{_BASE}/presProps",
 }
 

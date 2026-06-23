@@ -14,6 +14,7 @@ from pptforge.constants import (
     R_NS,
     REL_TYPES,
     MEDIA_REL_TYPES,
+    MEDIA_CONTENT_TYPES,
     LAYOUT_REL_TYPES,
 )
 from pptforge.config import resolve_source_pages, find_index_file
@@ -57,6 +58,7 @@ def _register_slides(
     slide_count: int,
     src_content_types_xml: bytes,
     notes_slide_indices: set[int] | None = None,
+    tag_paths: set[str] | None = None,
 ) -> None:
     root = etree.fromstring(src_presentation_xml)
     sld_id_lst = root.find(f"{{{P_NS}}}sldIdLst")
@@ -109,6 +111,17 @@ def _register_slides(
             notes_override.set(
                 "ContentType",
                 "application/vnd.openxmlformats-officedocument.presentationml.notesSlide+xml",
+            )
+
+    if tag_paths:
+        for tag_path in sorted(tag_paths):
+            tag_override = etree.SubElement(
+                ct_root, f"{{{CONTENT_TYPES_NS}}}Override"
+            )
+            tag_override.set("PartName", f"/{tag_path}")
+            tag_override.set(
+                "ContentType",
+                "application/vnd.openxmlformats-officedocument.presentationml.tags+xml",
             )
 
     content_types_xml = etree.tostring(
@@ -175,11 +188,12 @@ def merge(proposal: ProposalConfig) -> None:
 
 
             notes_slide_indices: set[int] = set()
+            tag_file_paths: set[str] = set()
 
             dst_slide_index = 1
             for src_path, src_slide_path in all_slides:
                 with zipfile.ZipFile(src_path, "r") as src_zip:
-                    _copy_slide(
+                    new_tags = _copy_slide(
                         src_zip=src_zip,
                         src_slide_path=src_slide_path,
                         dst_slide_index=dst_slide_index,
@@ -188,9 +202,11 @@ def merge(proposal: ProposalConfig) -> None:
                         dst_zip=dst_zip,
                         notes_slide_indices=notes_slide_indices,
                     )
+                    if new_tags:
+                        tag_file_paths.update(new_tags)
                 dst_slide_index += 1
 
-            # Ensure master and all referenced layouts are fully processed
+            # Ensure first source masters are fully processed
             pres_root = etree.fromstring(src_presentation_xml)
             master_id_lst = pres_root.find(f"{{{P_NS}}}sldMasterIdLst")
             if master_id_lst is not None:
@@ -208,6 +224,127 @@ def merge(proposal: ProposalConfig) -> None:
             for name, content in media_manager.files.items():
                 dst_zip.writestr(f"ppt/media/{name}", content)
 
+            # Identify new masters/themes from layout_manager (non-first-source)
+            new_master_paths: list[str] = []
+            new_theme_paths: list[str] = []
+            for path in layout_manager.files:
+                if "/_rels/" in path:
+                    continue
+                if path.startswith("ppt/slideMasters/") and path.endswith(".xml"):
+                    new_master_paths.append(path)
+                elif path.startswith("ppt/theme/") and path.endswith(".xml"):
+                    new_theme_paths.append(path)
+
+            # Enrich presentation.xml with new masters
+            if new_master_paths:
+                if master_id_lst is None:
+                    master_id_lst = etree.SubElement(pres_root, f"{{{P_NS}}}sldMasterIdLst")
+                max_mid = 0
+                for mid_elem in master_id_lst:
+                    mid_val = int(mid_elem.get("id", "0"))
+                    if mid_val > max_mid:
+                        max_mid = mid_val
+                pres_rels_root = etree.fromstring(src_presentation_rels)
+                max_rid_num = 0
+                for rel in pres_rels_root:
+                    rid = rel.get("Id", "")
+                    if rid.startswith("rId"):
+                        try:
+                            n = int(rid[3:])
+                            if n > max_rid_num:
+                                max_rid_num = n
+                        except ValueError:
+                            pass
+                for i, master_path in enumerate(new_master_paths):
+                    mid = max_mid + 1 + i
+                    rid = f"rId{max_rid_num + 1 + i}"
+                    sm_elem = etree.SubElement(master_id_lst, f"{{{P_NS}}}sldMasterId")
+                    sm_elem.set("id", str(mid))
+                    sm_elem.set(f"{{{R_NS}}}id", rid)
+                    rel_elem = etree.SubElement(pres_rels_root, "Relationship")
+                    rel_elem.set("Id", rid)
+                    rel_elem.set("Type", REL_TYPES["slideMaster"])
+                    rel_elem.set("Target", os.path.relpath(master_path, start="ppt"))
+                src_presentation_xml = etree.tostring(
+                    pres_root, xml_declaration=True, encoding="UTF-8", standalone=True
+                )
+                src_presentation_rels = etree.tostring(
+                    pres_rels_root, xml_declaration=True, encoding="UTF-8", standalone=True
+                )
+
+            # Enrich presentation.xml.rels with new themes
+            if new_theme_paths:
+                pres_rels_root = etree.fromstring(src_presentation_rels)
+                max_rid_num = 0
+                for rel in pres_rels_root:
+                    rid = rel.get("Id", "")
+                    if rid.startswith("rId"):
+                        try:
+                            n = int(rid[3:])
+                            if n > max_rid_num:
+                                max_rid_num = n
+                        except ValueError:
+                            pass
+                # Find starting offset for theme rIds
+                offset = 1
+                for i, theme_path in enumerate(new_theme_paths):
+                    rid = f"rId{max_rid_num + offset + i}"
+                    rel_elem = etree.SubElement(pres_rels_root, "Relationship")
+                    rel_elem.set("Id", rid)
+                    rel_elem.set("Type", REL_TYPES["theme"])
+                    rel_elem.set("Target", os.path.relpath(theme_path, start="ppt"))
+                src_presentation_rels = etree.tostring(
+                    pres_rels_root, xml_declaration=True, encoding="UTF-8", standalone=True
+                )
+
+            # Enrich Content_Types.xml with new layouts, masters, themes, media
+            ct_root = etree.fromstring(src_content_types_xml)
+            existing_defaults = set()
+            for child in ct_root:
+                if child.tag == f"{{{CONTENT_TYPES_NS}}}Default":
+                    ext = child.get("Extension", "")
+                    existing_defaults.add(ext.lower())
+            existing_overrides = set()
+            for child in ct_root:
+                if child.tag == f"{{{CONTENT_TYPES_NS}}}Override":
+                    pn = child.get("PartName", "")
+                    existing_overrides.add(pn)
+
+            # Register new layouts, masters, themes
+            for path in layout_manager.files:
+                if "/_rels/" in path:
+                    continue
+                part_name = f"/{path}"
+                if part_name in existing_overrides:
+                    continue
+                if path.startswith("ppt/slideLayouts/") and path.endswith(".xml"):
+                    ct_type = "application/vnd.openxmlformats-officedocument.presentationml.slideLayout+xml"
+                elif path.startswith("ppt/slideMasters/") and path.endswith(".xml"):
+                    ct_type = "application/vnd.openxmlformats-officedocument.presentationml.slideMaster+xml"
+                elif path.startswith("ppt/theme/") and path.endswith(".xml"):
+                    ct_type = "application/vnd.openxmlformats-officedocument.theme+xml"
+                else:
+                    continue
+                override = etree.SubElement(ct_root, f"{{{CONTENT_TYPES_NS}}}Override")
+                override.set("PartName", part_name)
+                override.set("ContentType", ct_type)
+                existing_overrides.add(part_name)
+
+            # Register new media extension defaults
+            for media_name in media_manager.files:
+                ext = os.path.splitext(media_name)[1].lower().lstrip(".")
+                if ext and ext not in existing_defaults:
+                    ct = MEDIA_CONTENT_TYPES.get(ext)
+                    if ct:
+                        default = etree.SubElement(ct_root, f"{{{CONTENT_TYPES_NS}}}Default")
+                        default.set("Extension", ext)
+                        default.set("ContentType", ct)
+                        existing_defaults.add(ext)
+
+            src_content_types_xml = etree.tostring(
+                ct_root, xml_declaration=True, encoding="UTF-8", standalone=True
+            )
+
             for name, content in layout_manager.files.items():
                 dst_zip.writestr(name, content)
 
@@ -217,6 +354,7 @@ def merge(proposal: ProposalConfig) -> None:
                 dst_slide_index - 1,
                 src_content_types_xml,
                 notes_slide_indices,
+                tag_file_paths,
             )
             _rewrite_presentation_rels(
                 dst_zip,
@@ -239,11 +377,12 @@ def _copy_slide(
     layout_manager: LayoutManager | None,
     dst_zip: zipfile.ZipFile,
     notes_slide_indices: set[int] | None = None,
-) -> None:
+) -> set[str]:
     slide_num = src_slide_path.split("/")[-1].replace("slide", "").replace(".xml", "")
     rels_path = f"ppt/slides/_rels/slide{slide_num}.xml.rels"
 
     target_mapping = {}
+    created_tags: set[str] = set()
 
     if rels_path in src_zip.namelist():
         rels_data = src_zip.read(rels_path)
@@ -284,6 +423,18 @@ def _copy_slide(
                         notes_slide_indices.add(dst_slide_index)
                     new_target = f"../notesSlides/notesSlide{dst_slide_index}.xml"
                     target_mapping[old_target] = new_target
+            elif rel_type == REL_TYPES["tags"]:
+                src_tag_path = os.path.normpath(
+                    os.path.join(os.path.dirname(src_slide_path), old_target)
+                )
+                if src_tag_path in src_zip.namelist():
+                    tag_data = src_zip.read(src_tag_path)
+                    tag_name = f"tag{dst_slide_index}_{old_target.split('/')[-1]}"
+                    dst_tag_path = f"ppt/tags/{tag_name}"
+                    dst_zip.writestr(dst_tag_path, tag_data)
+                    created_tags.add(dst_tag_path)
+                    new_target = f"../tags/{tag_name}"
+                    target_mapping[old_target] = new_target
 
         if target_mapping:
             for rel in root:
@@ -305,3 +456,5 @@ def _copy_slide(
     slide_data = src_zip.read(src_slide_path)
     dst_slide_path = f"ppt/slides/slide{dst_slide_index}.xml"
     dst_zip.writestr(dst_slide_path, slide_data)
+
+    return created_tags

@@ -14,8 +14,10 @@ class LayoutManager:
     ):
         self._layout_hashes: dict[str, str] = {}
         self._master_hashes: dict[str, str] = {}
+        self._theme_hashes: dict[str, str] = {}
         self._layout_counter: int = 1
         self._master_counter: int = 1
+        self._theme_counter: int = 1
         self.files: dict[str, bytes] = {}
         self._media_manager = media_manager
 
@@ -50,6 +52,19 @@ class LayoutManager:
                 )
                 if num >= self._master_counter:
                     self._master_counter = num + 1
+            elif (
+                name.startswith("ppt/theme/")
+                and name.endswith(".xml")
+                and "_rels" not in name
+            ):
+                content = base_zip.read(name)
+                h = hashlib.sha256(content).hexdigest()
+                self._theme_hashes[h] = name
+                num = int(
+                    name.replace("ppt/theme/theme", "").replace(".xml", "")
+                )
+                if num >= self._theme_counter:
+                    self._theme_counter = num + 1
 
     def ensure_layout(
         self,
@@ -83,12 +98,19 @@ class LayoutManager:
             for rel in root:
                 rel_type = rel.get("Type", "")
                 old_target = rel.get("Target", "")
-                if is_new and rel_type == REL_TYPES["slideMaster"]:
+                if rel_type == REL_TYPES["slideMaster"]:
                     layout_base = os.path.dirname(src_layout_path)
                     src_master_path = os.path.normpath(f"{layout_base}/{old_target}")
-                    master_new_path = self.ensure_master(
-                        src_zip, src_master_path
-                    )
+                    if is_new:
+                        master_new_path = self.ensure_master(
+                            src_zip, src_master_path
+                        )
+                    else:
+                        master_content = src_zip.read(src_master_path)
+                        master_hash = hashlib.sha256(master_content).hexdigest()
+                        master_new_path = self._master_hashes.get(
+                            master_hash, src_master_path
+                        )
                     rel.set(
                         "Target",
                         os.path.relpath(
@@ -185,6 +207,22 @@ class LayoutManager:
                             start=os.path.dirname(out_master_path),
                         )
                         rel.set("Target", new_target)
+                elif rel_type == REL_TYPES["theme"]:
+                    src_theme_path = os.path.normpath(
+                        os.path.join(
+                            os.path.dirname(src_master_path), old_target
+                        )
+                    )
+                    new_theme_path = self._ensure_theme(
+                        src_zip, src_theme_path
+                    )
+                    rel.set(
+                        "Target",
+                        os.path.relpath(
+                            new_theme_path,
+                            start=os.path.dirname(out_master_path),
+                        ),
+                    )
             rels_data = etree.tostring(
                 root, xml_declaration=True, encoding="UTF-8", standalone=True
             )
@@ -195,3 +233,20 @@ class LayoutManager:
         if is_new:
             self.files[out_master_path] = content
         return out_master_path
+
+    def _ensure_theme(
+        self,
+        src_zip: zipfile.ZipFile,
+        src_theme_path: str,
+    ) -> str:
+        src_theme_path = os.path.normpath(src_theme_path)
+        content = src_zip.read(src_theme_path)
+        h = hashlib.sha256(content).hexdigest()
+        if h in self._theme_hashes:
+            return self._theme_hashes[h]
+
+        out_theme_path = f"ppt/theme/theme{self._theme_counter}.xml"
+        self._theme_counter += 1
+        self._theme_hashes[h] = out_theme_path
+        self.files[out_theme_path] = content
+        return out_theme_path
