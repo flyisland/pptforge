@@ -29,8 +29,12 @@ def _get_slide_paths(src_zip: zipfile.ZipFile) -> list[str]:
 
 def _parse_notes_metadata(notes_xml: bytes) -> dict:
     root = etree.fromstring(notes_xml)
-    texts = root.findall(f".//{{{A_NS}}}t")
-    full_text = "\n".join(t.text or "" for t in texts)
+    lines = []
+    for para in root.findall(f".//{{{A_NS}}}p"):
+        para_text = "".join(t.text or "" for t in para.findall(f".//{{{A_NS}}}t"))
+        if para_text.strip():
+            lines.append(para_text)
+    full_text = "\n".join(lines)
     meta_section = full_text.split("---")[0]
     result: dict = {}
     for line in meta_section.strip().splitlines():
