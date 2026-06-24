@@ -26,14 +26,15 @@ def _get_slide_count(src_zip: zipfile.ZipFile) -> int:
 def validate_static(proposal: ProposalConfig, force: bool = False) -> None:
     errors = []
 
-    output_dir = os.path.dirname(proposal.output_path) or "."
+    output_path = os.path.realpath(proposal.output_path)
+    output_dir = os.path.dirname(output_path) or "."
     if not os.path.isdir(output_dir):
         try:
             os.makedirs(output_dir, exist_ok=True)
         except OSError:
             errors.append(f"输出目录无法创建：{output_dir}")
 
-    if os.path.exists(proposal.output_path) and not force:
+    if os.path.exists(output_path) and not force:
         errors.append(
             f"输出文件已存在：{proposal.output_path}（使用 --force 覆盖）"
         )
@@ -48,6 +49,12 @@ def validate_static(proposal: ProposalConfig, force: bool = False) -> None:
             for tag in src.tags:
                 if not tag:
                     errors.append(f"tag 名为空：\"{src.pptx_path}\"")
+
+        src_path = os.path.realpath(src.pptx_path)
+        if src_path == output_path:
+            errors.append(
+                f"输出文件路径与源文件冲突：\"{proposal.output_path}\""
+            )
 
     if errors:
         raise ValidationError(errors)
