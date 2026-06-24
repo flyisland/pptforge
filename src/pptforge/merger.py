@@ -344,7 +344,7 @@ def merge(proposal: ProposalConfig) -> None:
             for media_name in media_manager.files:
                 ext = os.path.splitext(media_name)[1].lower().lstrip(".")
                 if ext and ext not in existing_defaults:
-                    ct = MEDIA_CONTENT_TYPES.get(ext)
+                    ct = MEDIA_CONTENT_TYPES.get(f".{ext}")
                     if ct:
                         default = etree.SubElement(ct_root, f"{{{CONTENT_TYPES_NS}}}Default")
                         default.set("Extension", ext)

@@ -6,32 +6,15 @@
 
 ## LayoutManager (`layout_manager.py`)
 
-### 1. 新增 `_ensure_text_styles` 方法
+### 1. ~~`_ensure_text_styles` — 移除（错误元素名）~~
 
-**问题**：当输出中出现 ≥3 个不同源文件的 SlideMaster 时（总 master 数 ≥3），若所有 master 都缺少 `<p:textStyles>` 元素，PowerPoint 在打开时触发 Repair dialog（"Found a problem with content"）。1–2 个 master 缺少时不触发。
+~~**问题**：当输出中出现 ≥3 个不同源文件的 SlideMaster 时，PowerPoint 触发 Repair dialog。~~
 
-**解决**：新增 `_ensure_text_styles(content: bytes) -> bytes` 静态方法，用 lxml parse master XML，检查是否存在 `<p:textStyles>`，若不存在则插入包含三个子样式（`titleStyle`、`bodyStyle`、`otherStyle`）的 `textStyles` 元素。在 `ensure_master()` 中调用该方法，将修饰后的内容存入 `self.files`。
+~~**解决**：新增 `_ensure_text_styles` 静态方法，在 master XML 缺少 `<p:textStyles>` 时插入。~~
 
-```python
-@staticmethod
-def _ensure_text_styles(content: bytes) -> bytes:
-    root = etree.fromstring(content)
-    ts = root.find(f"{{{P}}}textStyles")
-    if ts is not None:
-        return content
-    ts = etree.SubElement(root, f"{{{P}}}textStyles")
-    for style_name, sz in [("titleStyle", "4400"), ("bodyStyle", "2800"), ("otherStyle", "1800")]:
-        lvl = etree.SubElement(ts, f"{{{P}}}{style_name}")
-        lvl1 = etree.SubElement(lvl, f"{{{P}}}lvl1pPr")
-        def_rpr = etree.SubElement(lvl1, f"{{{A}}}defRPr")
-        def_rpr.set("sz", sz)
-        ...
-```
+**修复**：该方法查找 `textStyles`（不存在于 OOXML 中），实际元素名应为 `txStyles`。因此它**总是**找不到目标，并在已存在合法 `<p:txStyles>` 的 master 中追加了**非法**的 `<p:textStyles>` 元素，导致 PowerPoint schema 校验失败。
 
-关键点：
-- 只在 master XML 上操作，不涉及 slide XML（符合"透传"原则）
-- `is_new` 判断仍基于原始内容的 hash（避免 hash 不匹配导致重复 master）
-- `self.files` 始终存储 `_ensure_text_styles` 后的内容
+**解决**：完全移除 `_ensure_text_styles` 方法及其在 `ensure_master` 中的调用。所有 fixture master 已包含 `<p:txStyles>`，该方法既不需要也无法正确工作。master XML 现在逐字节透传，与 slide XML 一致。
 
 ### 2. `ensure_master` / `ensure_layout` 新增 Diagram rels 处理
 
@@ -93,7 +76,9 @@ skip_prefixes = (
 )
 ```
 
-### 8. Enrichment — 过滤已存在的 master
+### 8. Enrichment — 过滤已存在的 master（因 `_ensure_text_styles` 启用）
+
+注：此修复仅在 `_ensure_text_styles` 仍存在时有意义。移除 `_ensure_text_styles` 后，首个源文件的 master 不再存入 `layout_manager.files`（因 `is_new=False` 时不再无条件写入 `self.files`），此过滤逻辑虽无害但已非必要。
 
 **问题**：master enrichment 代码从 `layout_manager.files` 中收集所有 master 路径并全部注册到 `sldMasterIdLst`。但 `layout_manager.files` 包含首个源文件的 master（因为 `ensure_master` 为其添加了 `textStyles` 后将其存入 `self.files`）。这导致首个源文件的 master 被二次注册，`presentation.xml.rels` 中出现两条指向 `slideMaster1.xml` 的记录，`sldMasterIdLst` 中出现重复的 rId 引用。
 
@@ -137,18 +122,16 @@ new_master_paths = [p for p in layout_manager.files
 - `prefix: str` — 文件名前缀（如 `"diagram"`），默认 `"image"`
 - `content_type: str` — 可选的 Content-Type 值，存储在 `content_types` 字典中供后续注册使用
 
----
+### 11. `MEDIA_CONTENT_TYPES` dot 前缀不匹配
 
-## 未解决的问题
+**问题**：`MEDIA_CONTENT_TYPES` 的 key 带 dot 前缀（如 `".jpg"`），但 Content-Type 注册代码在查找时通过 `lstrip(".")` 移除了 dot（变成 `"jpg"`），导致 `MEDIA_CONTENT_TYPES.get("jpg")` 返回 `None`。`.jpg` 文件因此未被注册 Content-Type，生成的文件在 PowerPoint 中报错。
 
-### gitlab + LLM 组合仍触发 Repair
+**解决**：在 `merger.py:347` 的 lookup 中补回 dot：`MEDIA_CONTENT_TYPES.get(f".{ext}")`。
 
-以下组合在 PowerPoint 中可正常打开：
-- dap + gitlab
-- dap + LLM
+### 12. 新增测试
 
-以下组合触发 "Found a problem with content" Repair dialog：
-- dap + gitlab + LLM
-- gitlab + LLM
-
-共同特征：gitlab 和 LLM 出现在同一个输出文件中。LibreOffice 可正常打开所有组合。root cause 尚未定位。
+| 测试 | 文件 | 验证内容 |
+|------|------|----------|
+| `test_no_invalid_text_styles_in_masters` | `test_merger_layout.py` | 输出 master 中不存在非法 `<p:textStyles>` 元素 |
+| `test_all_media_has_content_type` | `test_merger_media.py` | 所有输出文件均有正确的 Content-Type 注册 |
+| `test_jpg_content_type_registration` | `test_merger_media.py` | 包含 `.jpg` 媒体的合并结果正确注册 `Default Extension="jpg"` |
