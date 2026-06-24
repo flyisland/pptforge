@@ -46,6 +46,8 @@ def _copy_skeleton(src_zip: zipfile.ZipFile, dst_zip: zipfile.ZipFile) -> None:
         "ppt/presentation.xml",
         "ppt/_rels/presentation.xml.rels",
         "[Content_Types].xml",
+        "docProps/app.xml",
+        "docProps/core.xml",
     )
     for name in src_zip.namelist():
         if any(name.startswith(p) for p in skip_prefixes):
@@ -155,6 +157,23 @@ def _rewrite_presentation_rels(
         root, xml_declaration=True, encoding="UTF-8", standalone=True
     )
     dst_zip.writestr("ppt/_rels/presentation.xml.rels", rels_xml)
+
+
+def _rewrite_docprops(
+    dst_zip: zipfile.ZipFile,
+    slide_count: int,
+    notes_slide_count: int,
+) -> None:
+    app_xml = f"""<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Properties xmlns="http://schemas.openxmlformats.org/officeDocument/2006/extended-properties">
+  <Slides>{slide_count}</Slides>
+  <Notes>{notes_slide_count}</Notes>
+</Properties>""".encode("utf-8")
+    dst_zip.writestr("docProps/app.xml", app_xml)
+
+    core_xml = b"""<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<cp:coreProperties xmlns:cp="http://schemas.openxmlformats.org/package/2006/metadata/core-properties" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:dcterms="http://purl.org/dc/terms/" xmlns:dcmitype="http://purl.org/dc/dcmitype/" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"/>"""
+    dst_zip.writestr("docProps/core.xml", core_xml)
 
 
 def merge(proposal: ProposalConfig) -> None:
@@ -320,6 +339,9 @@ def merge(proposal: ProposalConfig) -> None:
                     pn = child.get("PartName", "")
                     existing_overrides.add(pn)
 
+            new_defaults: list[dict[str, str]] = []
+            new_overrides: list[dict[str, str]] = []
+
             # Register new layouts, masters, themes
             for path in layout_manager.files:
                 if "/_rels/" in path:
@@ -335,9 +357,7 @@ def merge(proposal: ProposalConfig) -> None:
                     ct_type = "application/vnd.openxmlformats-officedocument.theme+xml"
                 else:
                     continue
-                override = etree.SubElement(ct_root, f"{{{CONTENT_TYPES_NS}}}Override")
-                override.set("PartName", part_name)
-                override.set("ContentType", ct_type)
+                new_overrides.append({"PartName": part_name, "ContentType": ct_type})
                 existing_overrides.add(part_name)
 
             # Register new media extension defaults
@@ -346,19 +366,33 @@ def merge(proposal: ProposalConfig) -> None:
                 if ext and ext not in existing_defaults:
                     ct = MEDIA_CONTENT_TYPES.get(f".{ext}")
                     if ct:
-                        default = etree.SubElement(ct_root, f"{{{CONTENT_TYPES_NS}}}Default")
-                        default.set("Extension", ext)
-                        default.set("ContentType", ct)
+                        new_defaults.append({"Extension": ext, "ContentType": ct})
                         existing_defaults.add(ext)
 
             # Register Override content types for diagram files
-            for media_name, ct in media_manager.content_types.items():
+            for media_name, ct_obj in media_manager.content_types.items():
                 part_name = f"/ppt/media/{media_name}"
                 if part_name not in existing_overrides:
-                    override = etree.SubElement(ct_root, f"{{{CONTENT_TYPES_NS}}}Override")
-                    override.set("PartName", part_name)
-                    override.set("ContentType", ct)
+                    new_overrides.append({"PartName": part_name, "ContentType": ct_obj})
                     existing_overrides.add(part_name)
+
+            # Rebuild ct_root with all Defaults first, then all Overrides
+            defaults = [child for child in ct_root if child.tag == f"{{{CONTENT_TYPES_NS}}}Default"]
+            overrides = [child for child in ct_root if child.tag == f"{{{CONTENT_TYPES_NS}}}Override"]
+            for child in list(ct_root):
+                ct_root.remove(child)
+            for d in defaults:
+                ct_root.append(d)
+            for attrs in new_defaults:
+                el = etree.SubElement(ct_root, f"{{{CONTENT_TYPES_NS}}}Default")
+                for k, v in attrs.items():
+                    el.set(k, v)
+            for o in overrides:
+                ct_root.append(o)
+            for attrs in new_overrides:
+                el = etree.SubElement(ct_root, f"{{{CONTENT_TYPES_NS}}}Override")
+                for k, v in attrs.items():
+                    el.set(k, v)
 
             src_content_types_xml = etree.tostring(
                 ct_root, xml_declaration=True, encoding="UTF-8", standalone=True
@@ -379,6 +413,11 @@ def merge(proposal: ProposalConfig) -> None:
                 dst_zip,
                 src_presentation_rels,
                 dst_slide_index - 1,
+            )
+            _rewrite_docprops(
+                dst_zip,
+                dst_slide_index - 1,
+                len(notes_slide_indices),
             )
 
         os.replace(tmp_path, proposal.output_path)

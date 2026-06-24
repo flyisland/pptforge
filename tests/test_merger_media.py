@@ -208,3 +208,69 @@ def test_jpg_content_type_registration(tmp_path):
         assert 'Extension="jpg"' in ct_data, (
             "expected Default Extension=\"jpg\" in Content_Types.xml"
         )
+
+
+def test_content_types_defaults_before_overrides(tmp_path):
+    """OPC standard requires all Default elements before any Override."""
+    output = str(tmp_path / "output.pptx")
+    proposal = ProposalConfig(
+        output_path=output,
+        sources=[SlideSource(pptx_path="tests/fixtures/with_images.pptx", pages=[1, 2])]
+    )
+    merge(proposal)
+
+    with zipfile.ZipFile(output) as z:
+        ct_data = z.read("[Content_Types].xml")
+        root = etree.fromstring(ct_data)
+        CTS_NS = "http://schemas.openxmlformats.org/package/2006/content-types"
+        seen_override = False
+        for child in root:
+            if child.tag == f"{{{CTS_NS}}}Override":
+                seen_override = True
+            elif child.tag == f"{{{CTS_NS}}}Default":
+                assert not seen_override, (
+                    "Default element found after Override in [Content_Types].xml"
+                )
+
+
+def test_docprops_slide_count_matches(tmp_path):
+    """docProps/app.xml must report the actual slide and notes counts."""
+    output = str(tmp_path / "output.pptx")
+    proposal = ProposalConfig(
+        output_path=output,
+        sources=[SlideSource(pptx_path="tests/fixtures/with_images.pptx", pages=[1, 2])]
+    )
+    merge(proposal)
+
+    with zipfile.ZipFile(output) as z:
+        app_xml = z.read("docProps/app.xml").decode()
+        m_slides = __import__("re").search(r"<Slides>(\d+)</Slides>", app_xml)
+        m_notes = __import__("re").search(r"<Notes>(\d+)</Notes>", app_xml)
+        assert m_slides and int(m_slides.group(1)) == 2
+        assert m_notes and int(m_notes.group(1)) == 0
+
+        # Verify no duplicate zip entries
+        names = [ff.filename for ff in z.filelist]
+        assert len(names) == len(set(names)), f"duplicate zip entries: {names}"
+
+
+def test_thumbnail_preserved_when_referenced(tmp_path):
+    """docProps/thumbnail.* from the skeleton must be preserved when _rels/.rels references it."""
+    from pptforge.constants import REL_TYPES
+    # Build using with_metadata.pptx as first source (has no thumbnail), then
+    # manually verify the thumbnail from the skeleton isn't lost.
+    output = str(tmp_path / "output.pptx")
+    proposal = ProposalConfig(
+        output_path=output,
+        sources=[SlideSource(pptx_path="tests/fixtures/with_images.pptx", pages=[1])]
+    )
+    merge(proposal)
+
+    with zipfile.ZipFile(output) as z:
+        rels = etree.fromstring(z.read("_rels/.rels"))
+        for r in rels:
+            target = r.get("Target", "")
+            if target.startswith("docProps/thumbnail"):
+                assert target in z.namelist(), (
+                    f"Thumbnail '{target}' referenced in _rels/.rels but missing from zip"
+                )
