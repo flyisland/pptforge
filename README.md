@@ -4,6 +4,8 @@ PPTX 页面提取与合成工具。从多个 PPTX 源文件中提取指定页面
 
 ## 安装
 
+本项目使用 [UV](https://docs.astral.sh/uv/#installation) 管理 Python 环境和依赖。请先安装 UV，然后：
+
 ```bash
 uv tool install .
 ```
@@ -16,13 +18,9 @@ uv run pptforge --help
 
 ## 使用
 
-### 1. 准备源文件
+### 1. 在 Slide Notes 中定义 Tag
 
-将 PPTX 文件放在共享目录中。proposal 中引用源文件时，支持相对路径（相对于 proposal 所在目录）和绝对路径。
-
-### 2. 在 Slide Notes 中定义 Tag
-
-在源文件的 slide notes 中添加 tag，用于后续按 tag 筛选页面。支持三种标记：
+在PPTX文件的 slide notes 中添加 tag，用于后续按 tag 筛选页面。支持三种标记：
 
 ```
 @tags: Pipeline, 重点功能
@@ -44,12 +42,13 @@ description: 客户A初次拜访，侧重DevOps转型
 output: ./output/客户A_20240715.pptx
 
 slides:
+  - ./定制页.pptx:1
   - ./sources/gitlab.pptx[CI/CD]
   - ./sources/gitlab.pptx[CI/CD, Pipeline]:1-3
   - ./sources/gitlab.pptx[CI/CD]:-1
   - ./sources/cases_fin.pptx:3, 5
   - ./sources/kubernetes.pptx:3-7
-  - ./临时/定制页.pptx
+  - ./定制页.pptx:-1
 ```
 
 **源表达式语法**: `source[tag1, tag2, ...]:range1, range2, ...`
@@ -62,7 +61,7 @@ slides:
 
 页码支持负数相对定位：`-1` = 最后一页，`-3--1` = 最后 3 页。
 
-Slide notes 中定义的 tag（`@tags`、`@tag-start`/`@tag-end`）在构建时自动读取——无需单独的 index 步骤。
+Slide notes 中定义的 tag（`@tags`、`@tag-start`/`@tag-end`）在构建时自动读取。
 
 ### 4. 构建
 
