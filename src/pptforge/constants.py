@@ -26,9 +26,10 @@ REL_TYPES = {
     "diagramQuickStyle": f"{_BASE}/diagramQuickStyle",
     "diagramLayout": f"{_BASE}/diagramLayout",
     "diagramDrawing": f"{_MS}/diagramDrawing",
+    "hdphoto": f"{_MS}/hdphoto",
 }
 
-MEDIA_REL_TYPES = {REL_TYPES["image"], REL_TYPES["video"], REL_TYPES["audio"]}
+MEDIA_REL_TYPES = {REL_TYPES["image"], REL_TYPES["video"], REL_TYPES["audio"], REL_TYPES["hdphoto"]}
 LAYOUT_REL_TYPES = {REL_TYPES["slideLayout"]}
 DIAGRAM_REL_TYPES = {
     REL_TYPES["diagramData"],
@@ -64,4 +65,5 @@ MEDIA_CONTENT_TYPES = {
     ".m4a": "audio/mp4",
     ".emf": "image/x-emf",
     ".wmf": "image/x-wmf",
+    ".wdp": "image/vnd.ms-photo",
 }
