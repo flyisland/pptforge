@@ -6,6 +6,8 @@ R_NS = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
 
 _BASE = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
 
+_MS = "http://schemas.microsoft.com/office/2007/relationships"
+
 REL_TYPES = {
     "slide": f"{_BASE}/slide",
     "slideLayout": f"{_BASE}/slideLayout",
@@ -16,12 +18,33 @@ REL_TYPES = {
     "hyperlink": f"{_BASE}/hyperlink",
     "theme": f"{_BASE}/theme",
     "notesSlide": f"{_BASE}/notesSlide",
+    "notesMaster": f"{_BASE}/notesMaster",
     "tags": f"{_BASE}/tags",
     "presProps": f"{_BASE}/presProps",
+    "diagramData": f"{_BASE}/diagramData",
+    "diagramColors": f"{_BASE}/diagramColors",
+    "diagramQuickStyle": f"{_BASE}/diagramQuickStyle",
+    "diagramLayout": f"{_BASE}/diagramLayout",
+    "diagramDrawing": f"{_MS}/diagramDrawing",
 }
 
 MEDIA_REL_TYPES = {REL_TYPES["image"], REL_TYPES["video"], REL_TYPES["audio"]}
 LAYOUT_REL_TYPES = {REL_TYPES["slideLayout"]}
+DIAGRAM_REL_TYPES = {
+    REL_TYPES["diagramData"],
+    REL_TYPES["diagramDrawing"],
+    REL_TYPES["diagramColors"],
+    REL_TYPES["diagramQuickStyle"],
+    REL_TYPES["diagramLayout"],
+}
+
+DIAGRAM_CONTENT_TYPES = {
+    "diagramData": "application/vnd.openxmlformats-officedocument.drawingml.diagramData+xml",
+    "diagramDrawing": "application/vnd.ms-office.drawingml.diagramDrawing+xml",
+    "diagramColors": "application/vnd.openxmlformats-officedocument.drawingml.diagramColors+xml",
+    "diagramQuickStyle": "application/vnd.openxmlformats-officedocument.drawingml.diagramStyle+xml",
+    "diagramLayout": "application/vnd.openxmlformats-officedocument.drawingml.diagramLayout+xml",
+}
 
 MEDIA_CONTENT_TYPES = {
     ".png": "image/png",

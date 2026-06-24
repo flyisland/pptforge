@@ -3,7 +3,7 @@ import os
 import zipfile
 from lxml import etree
 
-from pptforge.constants import RELS_NS, REL_TYPES, MEDIA_CONTENT_TYPES, MEDIA_REL_TYPES
+from pptforge.constants import RELS_NS, REL_TYPES, MEDIA_CONTENT_TYPES, MEDIA_REL_TYPES, DIAGRAM_REL_TYPES
 
 
 class LayoutManager:
@@ -131,6 +131,24 @@ class LayoutManager:
                             start=os.path.dirname(out_layout_path),
                         )
                         rel.set("Target", new_target)
+                elif self._media_manager and rel_type in DIAGRAM_REL_TYPES:
+                    diag_abs = os.path.normpath(
+                        os.path.join(os.path.dirname(src_layout_path), old_target)
+                    )
+                    if diag_abs in src_zip.namelist():
+                        ext = os.path.splitext(old_target)[1].lower()
+                        diag_content = src_zip.read(diag_abs)
+                        diag_ct = None
+                        for dk, dv in REL_TYPES.items():
+                            if dv == rel_type and dk in DIAGRAM_CONTENT_TYPES:
+                                diag_ct = DIAGRAM_CONTENT_TYPES[dk]
+                                break
+                        new_name = self._media_manager.add_media(diag_content, ext, prefix="diagram", content_type=diag_ct)
+                        new_target = os.path.relpath(
+                            f"ppt/media/{new_name}",
+                            start=os.path.dirname(out_layout_path),
+                        )
+                        rel.set("Target", new_target)
             rels_data = etree.tostring(
                 root, xml_declaration=True, encoding="UTF-8", standalone=True
             )
@@ -142,24 +160,48 @@ class LayoutManager:
             self.files[out_layout_path] = content
         return out_layout_path
 
+    @staticmethod
+    def _ensure_text_styles(content: bytes) -> bytes:
+        root = etree.fromstring(content)
+        P = "http://schemas.openxmlformats.org/presentationml/2006/main"
+        A = "http://schemas.openxmlformats.org/drawingml/2006/main"
+        NSMAP = {"p": P, "a": A}
+        ts = root.find(f"{{{P}}}textStyles")
+        if ts is not None:
+            return content
+        ts = etree.SubElement(root, f"{{{P}}}textStyles")
+        for style_name, sz in [("titleStyle", "4400"), ("bodyStyle", "2800"), ("otherStyle", "1800")]:
+            lvl = etree.SubElement(ts, f"{{{P}}}{style_name}")
+            lvl1 = etree.SubElement(lvl, f"{{{P}}}lvl1pPr")
+            def_rpr = etree.SubElement(lvl1, f"{{{A}}}defRPr")
+            def_rpr.set("sz", sz)
+            def_rpr.set("kern", "1200")
+            sf = etree.SubElement(def_rpr, f"{{{A}}}solidFill")
+            sc = etree.SubElement(sf, f"{{{A}}}schemeClr")
+            sc.set("val", "tx1")
+            etree.SubElement(def_rpr, f"{{{A}}}latin").set("typeface", "+mn-lt")
+            etree.SubElement(def_rpr, f"{{{A}}}ea").set("typeface", "+mn-ea")
+        return etree.tostring(root, xml_declaration=True, encoding="UTF-8", standalone=True)
+
     def ensure_master(
         self,
         src_zip: zipfile.ZipFile,
         src_master_path: str,
     ) -> str:
         src_master_path = os.path.normpath(src_master_path)
-        content = src_zip.read(src_master_path)
-        h = hashlib.sha256(content).hexdigest()
-        is_new = h not in self._master_hashes
+        raw_content = src_zip.read(src_master_path)
+        raw_hash = hashlib.sha256(raw_content).hexdigest()
+        is_new = raw_hash not in self._master_hashes
 
-        if is_new:
+        content = self._ensure_text_styles(raw_content)
+        if not is_new:
+            out_master_path = self._master_hashes[raw_hash]
+        else:
             out_master_path = (
                 f"ppt/slideMasters/slideMaster{self._master_counter}.xml"
             )
             self._master_counter += 1
-            self._master_hashes[h] = out_master_path
-        else:
-            out_master_path = self._master_hashes[h]
+            self._master_hashes[raw_hash] = out_master_path
 
         master_rels_path = (
             src_master_path.replace(
@@ -207,6 +249,26 @@ class LayoutManager:
                             start=os.path.dirname(out_master_path),
                         )
                         rel.set("Target", new_target)
+                elif self._media_manager and rel_type in DIAGRAM_REL_TYPES:
+                    diag_abs = os.path.normpath(
+                        os.path.join(
+                            os.path.dirname(src_master_path), old_target
+                        )
+                    )
+                    if diag_abs in src_zip.namelist():
+                        ext = os.path.splitext(old_target)[1].lower()
+                        diag_content = src_zip.read(diag_abs)
+                        diag_ct = None
+                        for dk, dv in REL_TYPES.items():
+                            if dv == rel_type and dk in DIAGRAM_CONTENT_TYPES:
+                                diag_ct = DIAGRAM_CONTENT_TYPES[dk]
+                                break
+                        new_name = self._media_manager.add_media(diag_content, ext, prefix="diagram", content_type=diag_ct)
+                        new_target = os.path.relpath(
+                            f"ppt/media/{new_name}",
+                            start=os.path.dirname(out_master_path),
+                        )
+                        rel.set("Target", new_target)
                 elif rel_type == REL_TYPES["theme"]:
                     src_theme_path = os.path.normpath(
                         os.path.join(
@@ -230,8 +292,7 @@ class LayoutManager:
             out_rels_path = f"ppt/slideMasters/_rels/{out_rels_name}.rels"
             self.files[out_rels_path] = rels_data
 
-        if is_new:
-            self.files[out_master_path] = content
+        self.files[out_master_path] = content
         return out_master_path
 
     def _ensure_theme(

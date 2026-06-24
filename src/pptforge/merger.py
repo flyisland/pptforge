@@ -14,6 +14,8 @@ from pptforge.constants import (
     MEDIA_REL_TYPES,
     MEDIA_CONTENT_TYPES,
     LAYOUT_REL_TYPES,
+    DIAGRAM_REL_TYPES,
+    DIAGRAM_CONTENT_TYPES,
 )
 from pptforge.config import resolve_source_pages
 from pptforge.extractor import extract_index
@@ -40,6 +42,7 @@ def _copy_skeleton(src_zip: zipfile.ZipFile, dst_zip: zipfile.ZipFile) -> None:
         "ppt/tags/",
         "ppt/slideLayouts/_rels/",
         "ppt/slideMasters/_rels/",
+        "ppt/slideMasters/slideMaster",
         "ppt/presentation.xml",
         "ppt/_rels/presentation.xml.rels",
         "[Content_Types].xml",
@@ -221,13 +224,24 @@ def merge(proposal: ProposalConfig) -> None:
                 dst_zip.writestr(f"ppt/media/{name}", content)
 
             # Identify new masters/themes from layout_manager (non-first-source)
+            existing_master_paths: set[str] = set()
+            if master_id_lst is not None:
+                for mid_elem in master_id_lst:
+                    rid = mid_elem.get(f"{{{R_NS}}}id", "")
+                    for rel in etree.fromstring(src_presentation_rels):
+                        if rel.get("Id") == rid:
+                            existing_master_paths.add(
+                                os.path.normpath(f"ppt/{rel.get('Target')}")
+                            )
+                            break
             new_master_paths: list[str] = []
             new_theme_paths: list[str] = []
             for path in layout_manager.files:
                 if "/_rels/" in path:
                     continue
                 if path.startswith("ppt/slideMasters/") and path.endswith(".xml"):
-                    new_master_paths.append(path)
+                    if path not in existing_master_paths:
+                        new_master_paths.append(path)
                 elif path.startswith("ppt/theme/") and path.endswith(".xml"):
                     new_theme_paths.append(path)
 
@@ -337,6 +351,15 @@ def merge(proposal: ProposalConfig) -> None:
                         default.set("ContentType", ct)
                         existing_defaults.add(ext)
 
+            # Register Override content types for diagram files
+            for media_name, ct in media_manager.content_types.items():
+                part_name = f"/ppt/media/{media_name}"
+                if part_name not in existing_overrides:
+                    override = etree.SubElement(ct_root, f"{{{CONTENT_TYPES_NS}}}Override")
+                    override.set("PartName", part_name)
+                    override.set("ContentType", ct)
+                    existing_overrides.add(part_name)
+
             src_content_types_xml = etree.tostring(
                 ct_root, xml_declaration=True, encoding="UTF-8", standalone=True
             )
@@ -419,6 +442,50 @@ def _copy_slide(
                         notes_slide_indices.add(dst_slide_index)
                     new_target = f"../notesSlides/notesSlide{dst_slide_index}.xml"
                     target_mapping[old_target] = new_target
+
+                # Copy / create notes slide rels
+                src_notes_num = src_notes_path.split("/")[-1].replace("notesSlide", "").replace(".xml", "")
+                src_notes_rels = f"ppt/notesSlides/_rels/notesSlide{src_notes_num}.xml.rels"
+                dst_notes_rels = f"ppt/notesSlides/_rels/notesSlide{dst_slide_index}.xml.rels"
+
+                if src_notes_rels in src_zip.namelist():
+                    nrels_data = src_zip.read(src_notes_rels)
+                    nrels_root = etree.fromstring(nrels_data)
+                    for nrel in nrels_root:
+                        nt = nrel.get("Target", "")
+                        nrtype = nrel.get("Type", "")
+                        if nrtype == REL_TYPES["slide"]:
+                            nrel.set("Target", f"../slides/slide{dst_slide_index}.xml")
+                        elif nrtype == REL_TYPES["notesMaster"]:
+                            nrel.set("Target", "../notesMasters/notesMaster1.xml")
+                        elif nrtype in MEDIA_REL_TYPES:
+                            nmedia_path = os.path.normpath(
+                                os.path.join(os.path.dirname(src_notes_path), nt)
+                            )
+                            if nmedia_path in src_zip.namelist():
+                                next = os.path.splitext(nt)[1].lower()
+                                ncontent = src_zip.read(nmedia_path)
+                                nname = media_manager.add_media(ncontent, next)
+                                nrel.set("Target", f"../media/{nname}")
+                    nrels_data = etree.tostring(
+                        nrels_root, xml_declaration=True, encoding="UTF-8", standalone=True
+                    )
+                else:
+                    nrels_root = etree.fromstring(
+                        b'<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"/>'
+                    )
+                    slide_rel = etree.SubElement(nrels_root, "Relationship")
+                    slide_rel.set("Id", "rId1")
+                    slide_rel.set("Type", REL_TYPES["slide"])
+                    slide_rel.set("Target", f"../slides/slide{dst_slide_index}.xml")
+                    nm_rel = etree.SubElement(nrels_root, "Relationship")
+                    nm_rel.set("Id", "rId2")
+                    nm_rel.set("Type", REL_TYPES["notesMaster"])
+                    nm_rel.set("Target", "../notesMasters/notesMaster1.xml")
+                    nrels_data = etree.tostring(
+                        nrels_root, xml_declaration=True, encoding="UTF-8", standalone=True
+                    )
+                dst_zip.writestr(dst_notes_rels, nrels_data)
             elif rel_type == REL_TYPES["tags"]:
                 src_tag_path = os.path.normpath(
                     os.path.join(os.path.dirname(src_slide_path), old_target)
@@ -431,6 +498,21 @@ def _copy_slide(
                     created_tags.add(dst_tag_path)
                     new_target = f"../tags/{tag_name}"
                     target_mapping[old_target] = new_target
+
+            elif rel_type in DIAGRAM_REL_TYPES:
+                src_diagram_path = os.path.normpath(
+                    os.path.join(os.path.dirname(src_slide_path), old_target)
+                )
+                if src_diagram_path in src_zip.namelist():
+                    diagram_content = src_zip.read(src_diagram_path)
+                    diag_ext = os.path.splitext(old_target)[1].lower()
+                    diag_ct = None
+                    for dk, dv in REL_TYPES.items():
+                        if dv == rel_type and dk in DIAGRAM_CONTENT_TYPES:
+                            diag_ct = DIAGRAM_CONTENT_TYPES[dk]
+                            break
+                    diag_name = media_manager.add_media(diagram_content, diag_ext, prefix="diagram", content_type=diag_ct)
+                    target_mapping[old_target] = f"../media/{diag_name}"
 
         if target_mapping:
             for rel in root:
