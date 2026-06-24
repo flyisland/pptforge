@@ -4,7 +4,7 @@
 
 PPTX 文件本质是 ZIP 压缩包，内含 XML 文件和媒体资源。`pptforge` 从多个 PPTX 源文件中选取指定页面，合并为一个新的输出演示文稿。
 
-**核心原则**：slide XML 逐字节原样复制（透传）。只有 `_rels` 文件和结构头文件（`presentation.xml`、`[Content_Types].xml`、`presentation.xml.rels`）会被解析和重写。
+**核心原则**：slide XML 逐字节原样复制（透传）。只有 `_rels` 文件和结构头文件（`presentation.xml`、`[Content_Types].xml`、`presentation.xml.rels`、layout/master 结构）会被解析和重写。
 
 ---
 
@@ -40,9 +40,11 @@ proposal.yaml
 | `ppt/tags/` | 随 slide 一起重建 |
 | `ppt/slideLayouts/_rels/` | 由 LayoutManager 重建 |
 | `ppt/slideMasters/_rels/` | 由 LayoutManager 重建 |
+| `ppt/slideMasters/slideMaster*.xml` | 由 LayoutManager 去重、重编号后重建 |
 | `ppt/presentation.xml` | 用新的 slide 列表重建 |
 | `ppt/_rels/presentation.xml.rels` | 用新的 rId 重建 |
 | `[Content_Types].xml` | 用新的注册项重建 |
+| `docProps/app.xml`、`docProps/core.xml` | 用当前输出页数/notes 重新生成 |
 
 `ppt/diagrams/` 不在跳过列表中：第一个 source 的 diagram part 随骨架保留，
 `DiagramManager` 会索引这些文件名，后续只写入新增或冲突改名后的 diagram part。
@@ -53,6 +55,11 @@ proposal.yaml
 
 扫描第一个 source 的 `ppt/slideLayouts/`、`ppt/slideMasters/`、`ppt/theme/`，
 计算每个文件的 SHA256 哈希。这些哈希用于后续迁移时跳过重复内容。
+
+同时读取第一个 source 的 `presentation.xml` 与 `presentation.xml.rels`，建立
+`slideMaster path → sldMasterId/@id` 映射；并从所有 base master 中收集
+`p:sldLayoutId/@id`。PowerPoint 要求 `sldMasterId/@id` 和 `sldLayoutId/@id`
+共享一个全局唯一 id 空间，所以 LayoutManager 会维护一个全局 id 池。
 
 ### 第 3 步 — 解析所有 source 的页面选择
 
@@ -133,7 +140,8 @@ LayoutManager.files → ppt/slideLayouts/slideLayoutN.xml
 
 - 清空已有 `<p:sldIdLst>`，从头重建
 - id 从 256 开始（`255 + i`），r:id 从 rId256 开始
-- 若有新 master 被迁移，追加 `<p:sldMasterId>` 条目，使用唯一 id 和 r:id
+- 删除依赖旧 slide id 的扩展（目前移除包含 `sectionLst` 的 `p:ext`），避免 section 指向不存在的旧页面
+- 若有新 master 被迁移，追加 `<p:sldMasterId>` 条目，使用 LayoutManager 分配的全局唯一 id 和新的 r:id
 
 ### 第 8 步 — 重写 `ppt/_rels/presentation.xml.rels`
 
@@ -171,6 +179,8 @@ os.replace(tmp_path, proposal.output_path)
 | `_layout_hashes` | slideLayout SHA256 → 输出路径 |
 | `_master_hashes` | slideMaster SHA256 → 输出路径 |
 | `_theme_hashes` | theme SHA256 → 输出路径 |
+| `master_ids` | 输出 slideMaster 路径 → `sldMasterId/@id` |
+| `_used_master_layout_ids` | 已占用的 master/layout 全局 id |
 
 ### 调用图
 
@@ -180,6 +190,8 @@ ensure_layout(源 layout 路径)
  ├─ 读取 _rels
  ├─ 针对每个 master rel → ensure_master()
  │                       ├─ 读取内容，计算哈希 → 已存在 → 返回已有路径
+ │                       ├─ 分配全局唯一 sldMasterId/@id
+ │                       ├─ 重写冲突的 p:sldLayoutId/@id
  │                       ├─ 读取 _rels
  │                       ├─ 针对每个 layout rel → ensure_layout()          （递归）
  │                       ├─ 针对每个 theme rel → _ensure_theme()
@@ -192,6 +204,25 @@ ensure_layout(源 layout 路径)
 
 此递归处理 layout 与 master 之间的交叉引用。每个文件按 SHA256 去重，
 确保每个唯一内容只处理一次，不会无限递归。
+
+### Master / Layout 全局 id 分配
+
+PowerPoint 对 `ppt/presentation.xml` 中的 `p:sldMasterId/@id` 和各个
+`ppt/slideMasters/slideMasterN.xml` 中的 `p:sldLayoutId/@id` 使用同一个全局 id
+空间。不同 source 可以合法地复用同一个 id，但合并到一个 deck 后如果仍然重复，
+PowerPoint 会在打开时提示 repair，并可能删除或重写相关结构。
+
+LayoutManager 的规则：
+
+- 初始化时，把第一个 source 的所有 `sldMasterId/@id` 和所有 master 内的
+  `sldLayoutId/@id` 加入 `_used_master_layout_ids`。
+- 迁移新 master 时，优先保留源 `sldMasterId/@id`；若该 id 已被占用，则从当前最大
+  已占用 id 之后递增分配。
+- 新 master XML 复制到输出前，检查其中每个 `p:sldLayoutId/@id`；未冲突则保留，
+  冲突则从同一个全局 id 池分配新值。
+- 只重写 master 结构里的 id 属性；slide XML 仍然逐字节复制。
+- `presentation.xml` 追加新 `<p:sldMasterId>` 时，直接使用 `layout_manager.master_ids`
+  中已经分配好的 id。
 
 ### Theme 去重
 
@@ -300,6 +331,7 @@ Tag 范围计算（`_compute_tags`）：
 | slide XML 逐字节复制 | 零风险丢失 Office 格式或数据。透传保证所有 OOXML 特性（动画、SmartArt、图表、嵌入式字体）完整保留。 |
 | 从第一个 source 取骨架 | 第一个 source 提供演示文稿基线——其主题、slide master、文档属性和视图设置都得以保留。其他 source 只贡献页面及其独有的 layout / master / theme / 媒体。 |
 | SHA256 去重 layout / master / theme | 多个 source 往往共享相同设计模板。哈希去重避免冗余副本，也避免重复注册导致的 rId 冲突。 |
+| master/layout id 全局唯一 | PowerPoint 将 `sldMasterId/@id` 与 `sldLayoutId/@id` 视作同一全局空间。跨源重复会触发 repair，所以迁移 master 时必须保留不冲突 id，并为冲突 id 重新分配。 |
 | diagram part 不做独立哈希去重 | SmartArt 由多个相互匹配的 diagram part 组成。独立去重会混用不同组的 data / drawing / style，导致 PowerPoint 修复内容。 |
 | Tag 顺序决定页面顺序 | 用户写 `[implementation, code-review]` 预期 implementaion 页面在前。`_get_tagged_pages()` 按 source.tags 顺序遍历，不按字母排序。 |
 | `.tmp` + `os.replace()` | 原子写入。合并中途崩溃不会留下损坏的 `.pptx`，最多残留一个 `.tmp` 文件，会被清理。 |

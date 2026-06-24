@@ -70,6 +70,8 @@ def _register_slides(
     else:
         sld_id_lst = etree.SubElement(root, f"{{{P_NS}}}sldIdLst")
 
+    _remove_slide_dependent_extensions(root)
+
     for i in range(1, slide_count + 1):
         sld_id = etree.SubElement(sld_id_lst, f"{{{P_NS}}}sldId")
         sld_id.set("id", str(255 + i))
@@ -131,6 +133,23 @@ def _register_slides(
         ct_root, xml_declaration=True, encoding="UTF-8", standalone=True
     )
     dst_zip.writestr("[Content_Types].xml", content_types_xml)
+
+
+def _remove_slide_dependent_extensions(root: etree._Element) -> None:
+    ext_lst = root.find(f"{{{P_NS}}}extLst")
+    if ext_lst is None:
+        return
+
+    for ext in list(ext_lst):
+        has_section_list = any(
+            etree.QName(descendant).localname == "sectionLst"
+            for descendant in ext.iter()
+        )
+        if has_section_list:
+            ext_lst.remove(ext)
+
+    if len(ext_lst) == 0:
+        root.remove(ext_lst)
 
 
 def _rewrite_presentation_rels(
@@ -276,8 +295,10 @@ def merge(proposal: ProposalConfig) -> None:
                 if master_id_lst is None:
                     master_id_lst = etree.SubElement(pres_root, f"{{{P_NS}}}sldMasterIdLst")
                 max_mid = 0
+                used_master_ids: set[int] = set()
                 for mid_elem in master_id_lst:
                     mid_val = int(mid_elem.get("id", "0"))
+                    used_master_ids.add(mid_val)
                     if mid_val > max_mid:
                         max_mid = mid_val
                 pres_rels_root = etree.fromstring(src_presentation_rels)
@@ -292,7 +313,16 @@ def merge(proposal: ProposalConfig) -> None:
                         except ValueError:
                             pass
                 for i, master_path in enumerate(new_master_paths):
-                    mid = max_mid + 1 + i
+                    preferred_mid = layout_manager.master_ids.get(master_path)
+                    if preferred_mid is not None:
+                        mid = preferred_mid
+                    else:
+                        mid = max_mid + 1
+                        while mid in used_master_ids:
+                            mid += 1
+                    used_master_ids.add(mid)
+                    if mid > max_mid:
+                        max_mid = mid
                     rid = f"rId{max_rid_num + 1 + i}"
                     sm_elem = etree.SubElement(master_id_lst, f"{{{P_NS}}}sldMasterId")
                     sm_elem.set("id", str(mid))

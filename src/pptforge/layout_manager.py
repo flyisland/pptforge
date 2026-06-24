@@ -3,7 +3,13 @@ import os
 import zipfile
 from lxml import etree
 
-from pptforge.constants import REL_TYPES, MEDIA_REL_TYPES, DIAGRAM_REL_TYPES
+from pptforge.constants import (
+    P_NS,
+    R_NS,
+    REL_TYPES,
+    MEDIA_REL_TYPES,
+    DIAGRAM_REL_TYPES,
+)
 from pptforge.media import DiagramManager
 
 
@@ -21,8 +27,15 @@ class LayoutManager:
         self._master_counter: int = 1
         self._theme_counter: int = 1
         self.files: dict[str, bytes] = {}
+        self.master_ids: dict[str, int] = {}
+        self._used_master_layout_ids: set[int] = set()
+        self._next_master_layout_id: int = 2147483648
         self._media_manager = media_manager
         self._diagram_manager = diagram_manager
+        base_master_ids = self._presentation_master_ids(base_zip)
+
+        for master_id in base_master_ids.values():
+            self._reserve_master_layout_id(master_id)
 
         for name in base_zip.namelist():
             if (
@@ -48,6 +61,10 @@ class LayoutManager:
                 content = base_zip.read(name)
                 h = hashlib.sha256(content).hexdigest()
                 self._master_hashes[h] = name
+                if name in base_master_ids:
+                    self.master_ids[name] = base_master_ids[name]
+                for layout_id in self._master_layout_ids(content):
+                    self._reserve_master_layout_id(layout_id)
                 num = int(
                     name.replace("ppt/slideMasters/slideMaster", "").replace(
                         ".xml", ""
@@ -68,6 +85,89 @@ class LayoutManager:
                 )
                 if num >= self._theme_counter:
                     self._theme_counter = num + 1
+
+    @staticmethod
+    def _normalize_presentation_target(target: str) -> str:
+        if target.startswith("/"):
+            return os.path.normpath(target.lstrip("/"))
+        return os.path.normpath(f"ppt/{target}")
+
+    def _presentation_master_ids(
+        self, src_zip: zipfile.ZipFile
+    ) -> dict[str, int]:
+        if (
+            "ppt/presentation.xml" not in src_zip.namelist()
+            or "ppt/_rels/presentation.xml.rels" not in src_zip.namelist()
+        ):
+            return {}
+
+        pres_root = etree.fromstring(src_zip.read("ppt/presentation.xml"))
+        master_id_lst = pres_root.find(f"{{{P_NS}}}sldMasterIdLst")
+        if master_id_lst is None:
+            return {}
+
+        rels_root = etree.fromstring(src_zip.read("ppt/_rels/presentation.xml.rels"))
+        rels_by_id = {rel.get("Id", ""): rel for rel in rels_root}
+
+        master_ids: dict[str, int] = {}
+        for master_id in master_id_lst:
+            rid = master_id.get(f"{{{R_NS}}}id", "")
+            rel = rels_by_id.get(rid)
+            if rel is None or rel.get("Type") != REL_TYPES["slideMaster"]:
+                continue
+            target = rel.get("Target", "")
+            try:
+                mid = int(master_id.get("id", ""))
+            except ValueError:
+                continue
+            master_ids[self._normalize_presentation_target(target)] = mid
+        return master_ids
+
+    @staticmethod
+    def _master_layout_ids(content: bytes) -> list[int]:
+        root = etree.fromstring(content)
+        layout_ids: list[int] = []
+        for layout_id in root.xpath("//p:sldLayoutId", namespaces={"p": P_NS}):
+            try:
+                layout_ids.append(int(layout_id.get("id", "")))
+            except ValueError:
+                continue
+        return layout_ids
+
+    def _reserve_master_layout_id(self, value: int) -> None:
+        self._used_master_layout_ids.add(value)
+        if value >= self._next_master_layout_id:
+            self._next_master_layout_id = value + 1
+
+    def _allocate_master_layout_id(self, preferred: int | None = None) -> int:
+        if preferred is not None and preferred not in self._used_master_layout_ids:
+            self._reserve_master_layout_id(preferred)
+            return preferred
+
+        while self._next_master_layout_id in self._used_master_layout_ids:
+            self._next_master_layout_id += 1
+        value = self._next_master_layout_id
+        self._reserve_master_layout_id(value)
+        return value
+
+    def _rewrite_conflicting_master_layout_ids(self, content: bytes) -> bytes:
+        root = etree.fromstring(content)
+        changed = False
+        for layout_id in root.xpath("//p:sldLayoutId", namespaces={"p": P_NS}):
+            try:
+                preferred = int(layout_id.get("id", ""))
+            except ValueError:
+                continue
+            allocated = self._allocate_master_layout_id(preferred)
+            if allocated != preferred:
+                layout_id.set("id", str(allocated))
+                changed = True
+
+        if not changed:
+            return content
+        return etree.tostring(
+            root, xml_declaration=True, encoding="UTF-8", standalone=True
+        )
 
     def ensure_layout(
         self,
@@ -183,6 +283,15 @@ class LayoutManager:
             )
             self._master_counter += 1
             self._master_hashes[raw_hash] = out_master_path
+
+        src_master_ids = self._presentation_master_ids(src_zip)
+        if out_master_path not in self.master_ids:
+            preferred_master_id = src_master_ids.get(src_master_path)
+            self.master_ids[out_master_path] = self._allocate_master_layout_id(
+                preferred_master_id
+            )
+        if is_new:
+            content = self._rewrite_conflicting_master_layout_ids(content)
 
         master_rels_path = (
             src_master_path.replace(
