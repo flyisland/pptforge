@@ -66,6 +66,22 @@
 
 媒体文件通过 `<Default Extension="...">` 处理，新增扩展名时检查是否已有对应条目。
 
+Diagram / SmartArt part 必须通过 `<Override>` 注册，不能只依赖 `.xml` 的
+`<Default>`。常见注册项：
+
+```xml
+<Override PartName="/ppt/diagrams/data1.xml"
+  ContentType="application/vnd.openxmlformats-officedocument.drawingml.diagramData+xml"/>
+<Override PartName="/ppt/diagrams/drawing1.xml"
+  ContentType="application/vnd.ms-office.drawingml.diagramDrawing+xml"/>
+<Override PartName="/ppt/diagrams/colors1.xml"
+  ContentType="application/vnd.openxmlformats-officedocument.drawingml.diagramColors+xml"/>
+<Override PartName="/ppt/diagrams/quickStyle1.xml"
+  ContentType="application/vnd.openxmlformats-officedocument.drawingml.diagramStyle+xml"/>
+<Override PartName="/ppt/diagrams/layout1.xml"
+  ContentType="application/vnd.openxmlformats-officedocument.drawingml.diagramLayout+xml"/>
+```
+
 ---
 
 ## 2. `ppt/presentation.xml`（只需关注 sldIdLst 部分）
@@ -140,6 +156,11 @@ http://schemas.openxmlformats.org/officeDocument/2006/relationships/slide
   <Relationship Id="rId4"
     Type=".../video"
     Target="../media/video1.mp4"/>
+
+  <!-- SmartArt / diagram -->
+  <Relationship Id="rId5"
+    Type=".../diagramData"
+    Target="../diagrams/data1.xml"/>
 </Relationships>
 ```
 
@@ -151,12 +172,21 @@ http://schemas.openxmlformats.org/officeDocument/2006/relationships/slide
 - `.../image`
 - `.../video`
 - `.../audio`
+- `http://schemas.microsoft.com/office/2007/relationships/hdphoto`
 
 需要在多母版场景下修改 Target 的类型：
 - `.../slideLayout`（当 layout 被迁移到新路径时）
 
 需要复制文件并改写 Target 的类型：
 - `.../tags`（tag XML 被重命名后复制到 `ppt/tags/` 目录）
+- `.../diagramData`
+- `http://schemas.microsoft.com/office/2007/relationships/diagramDrawing`
+- `.../diagramColors`
+- `.../diagramQuickStyle`
+- `.../diagramLayout`
+
+Diagram 关系的 Target 必须指向 `../diagrams/*.xml`。这些 XML part 是
+SmartArt 的一组相关资源，不能像媒体一样按单个文件哈希去重。
 
 绝对不修改的类型：
 - `.../hyperlink`（外部链接，Target 是 URL）
@@ -262,7 +292,35 @@ slide._rels 原来写的：../slideLayouts/slideLayout3.xml（源文件中的路
 
 ---
 
-## 7. `ppt/notesSlides/notesSlideN.xml`（备注页）
+## 7. `ppt/diagrams/*.xml`（SmartArt / diagram）
+
+SmartArt 相关 part 通常存放在 `ppt/diagrams/`：
+
+| 关系类型 | 目标文件示例 | Content-Type |
+|----------|--------------|--------------|
+| `.../diagramData` | `../diagrams/data1.xml` | `application/vnd.openxmlformats-officedocument.drawingml.diagramData+xml` |
+| Microsoft `.../diagramDrawing` | `../diagrams/drawing1.xml` | `application/vnd.ms-office.drawingml.diagramDrawing+xml` |
+| `.../diagramColors` | `../diagrams/colors1.xml` | `application/vnd.openxmlformats-officedocument.drawingml.diagramColors+xml` |
+| `.../diagramQuickStyle` | `../diagrams/quickStyle1.xml` | `application/vnd.openxmlformats-officedocument.drawingml.diagramStyle+xml` |
+| `.../diagramLayout` | `../diagrams/layout1.xml` | `application/vnd.openxmlformats-officedocument.drawingml.diagramLayout+xml` |
+
+合并规则：
+
+1. 第一个 source 的 `ppt/diagrams/*.xml` 随骨架复制，不重新写入。
+2. `DiagramManager` 索引第一个 source 中已存在的 diagram 文件名和内容。
+3. 复制 slide、layout、master 的 `_rels` 时，若遇到 diagram 关系：
+   - 原名未被占用：保留原名写入 `ppt/diagrams/`
+   - 原名已被占用且来自第一个 source、内容一致：复用原文件
+   - 原名已被占用且内容不同：按关系类型分配新顺序名
+4. 新增 diagram part 必须添加 `<Override>`。
+
+不要对 diagram part 做独立哈希去重。一个 SmartArt 可能同时引用 data、
+drawing、colors、quickStyle、layout；逐文件去重可能混用不同 SmartArt 组的
+part，PowerPoint 会在打开时修复或删除相关内容。
+
+---
+
+## 8. `ppt/notesSlides/notesSlideN.xml`（备注页）
 
 ```xml
 <p:notes xmlns:p="..." xmlns:a="...">
@@ -291,7 +349,7 @@ Index 扫描时用 lxml 读取 `<a:t>` 节点提取 metadata。
 
 ---
 
-## 8. 媒体文件类型映射
+## 9. 媒体文件类型映射
 
 ```python
 MEDIA_CONTENT_TYPES = {
@@ -312,15 +370,17 @@ MEDIA_CONTENT_TYPES = {
     ".m4a":  "audio/mp4",
     ".emf":  "image/x-emf",   # Windows 增强型图元文件，Office 图表常用
     ".wmf":  "image/x-wmf",
+    ".wdp":  "image/vnd.ms-photo",
 }
 ```
 
 ---
 
-## 9. 关系类型 URI 常量
+## 10. 关系类型 URI 常量
 
 ```python
 _BASE = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
+_MS = "http://schemas.microsoft.com/office/2007/relationships"
 
 REL_TYPES = {
     "slide":        f"{_BASE}/slide",
@@ -332,20 +392,41 @@ REL_TYPES = {
     "hyperlink":    f"{_BASE}/hyperlink",
     "theme":        f"{_BASE}/theme",
     "notesSlide":   f"{_BASE}/notesSlide",
+    "notesMaster":  f"{_BASE}/notesMaster",
     "tags":         f"{_BASE}/tags",
     "presProps":    f"{_BASE}/presProps",
+    "diagramData":  f"{_BASE}/diagramData",
+    "diagramColors": f"{_BASE}/diagramColors",
+    "diagramQuickStyle": f"{_BASE}/diagramQuickStyle",
+    "diagramLayout": f"{_BASE}/diagramLayout",
+    "diagramDrawing": f"{_MS}/diagramDrawing",
+    "hdphoto":      f"{_MS}/hdphoto",
 }
 
 # 需要进行媒体文件迁移的关系类型
-MEDIA_REL_TYPES = {REL_TYPES["image"], REL_TYPES["video"], REL_TYPES["audio"]}
+MEDIA_REL_TYPES = {
+    REL_TYPES["image"],
+    REL_TYPES["video"],
+    REL_TYPES["audio"],
+    REL_TYPES["hdphoto"],
+}
 
 # 需要在多母版场景下更新路径的关系类型
 LAYOUT_REL_TYPES = {REL_TYPES["slideLayout"]}
+
+# 需要迁移到 ppt/diagrams/ 且不能独立哈希去重的关系类型
+DIAGRAM_REL_TYPES = {
+    REL_TYPES["diagramData"],
+    REL_TYPES["diagramDrawing"],
+    REL_TYPES["diagramColors"],
+    REL_TYPES["diagramQuickStyle"],
+    REL_TYPES["diagramLayout"],
+}
 ```
 
 ---
 
-## 10. 从 _rels 读取 slide 顺序的正确方式
+## 11. 从 _rels 读取 slide 顺序的正确方式
 
 ```python
 def _get_slide_paths(src_zip: zipfile.ZipFile) -> list[str]:
