@@ -1,4 +1,5 @@
-from pptforge.media import MediaManager
+from pptforge.constants import REL_TYPES
+from pptforge.media import DiagramManager, MediaManager
 
 
 def test_dedup_same_content():
@@ -21,3 +22,23 @@ def test_naming_format():
     mm = MediaManager()
     name = mm.add_media(b"data", ".png")
     assert name == "image_001.png"
+
+
+def test_diagram_parts_are_not_hash_deduped_across_names():
+    dm = DiagramManager()
+    first = dm.add_diagram(
+        REL_TYPES["diagramQuickStyle"],
+        b"same style",
+        ".xml",
+        preferred_name="quickStyle1.xml",
+    )
+    second = dm.add_diagram(
+        REL_TYPES["diagramQuickStyle"],
+        b"same style",
+        ".xml",
+        preferred_name="quickStyle2.xml",
+    )
+
+    assert first == "quickStyle1.xml"
+    assert second == "quickStyle2.xml"
+    assert set(dm.files) == {"quickStyle1.xml", "quickStyle2.xml"}

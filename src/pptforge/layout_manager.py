@@ -3,7 +3,8 @@ import os
 import zipfile
 from lxml import etree
 
-from pptforge.constants import RELS_NS, REL_TYPES, MEDIA_CONTENT_TYPES, MEDIA_REL_TYPES, DIAGRAM_REL_TYPES
+from pptforge.constants import REL_TYPES, MEDIA_REL_TYPES, DIAGRAM_REL_TYPES
+from pptforge.media import DiagramManager
 
 
 class LayoutManager:
@@ -11,6 +12,7 @@ class LayoutManager:
         self,
         base_zip: zipfile.ZipFile,
         media_manager: "MediaManager | None" = None,
+        diagram_manager: DiagramManager | None = None,
     ):
         self._layout_hashes: dict[str, str] = {}
         self._master_hashes: dict[str, str] = {}
@@ -20,6 +22,7 @@ class LayoutManager:
         self._theme_counter: int = 1
         self.files: dict[str, bytes] = {}
         self._media_manager = media_manager
+        self._diagram_manager = diagram_manager
 
         for name in base_zip.namelist():
             if (
@@ -131,21 +134,22 @@ class LayoutManager:
                             start=os.path.dirname(out_layout_path),
                         )
                         rel.set("Target", new_target)
-                elif self._media_manager and rel_type in DIAGRAM_REL_TYPES:
+                elif self._diagram_manager and rel_type in DIAGRAM_REL_TYPES:
                     diag_abs = os.path.normpath(
                         os.path.join(os.path.dirname(src_layout_path), old_target)
                     )
                     if diag_abs in src_zip.namelist():
                         ext = os.path.splitext(old_target)[1].lower()
                         diag_content = src_zip.read(diag_abs)
-                        diag_ct = None
-                        for dk, dv in REL_TYPES.items():
-                            if dv == rel_type and dk in DIAGRAM_CONTENT_TYPES:
-                                diag_ct = DIAGRAM_CONTENT_TYPES[dk]
-                                break
-                        new_name = self._media_manager.add_media(diag_content, ext, prefix="diagram", content_type=diag_ct)
+                        new_name = self._diagram_manager.add_diagram(
+                            rel_type,
+                            diag_content,
+                            ext,
+                            preferred_name=os.path.basename(old_target),
+                            allow_existing=self._diagram_manager.is_base_zip(src_zip),
+                        )
                         new_target = os.path.relpath(
-                            f"ppt/media/{new_name}",
+                            f"ppt/diagrams/{new_name}",
                             start=os.path.dirname(out_layout_path),
                         )
                         rel.set("Target", new_target)
@@ -160,29 +164,6 @@ class LayoutManager:
             self.files[out_layout_path] = content
         return out_layout_path
 
-    @staticmethod
-    def _ensure_text_styles(content: bytes) -> bytes:
-        root = etree.fromstring(content)
-        P = "http://schemas.openxmlformats.org/presentationml/2006/main"
-        A = "http://schemas.openxmlformats.org/drawingml/2006/main"
-        NSMAP = {"p": P, "a": A}
-        ts = root.find(f"{{{P}}}textStyles")
-        if ts is not None:
-            return content
-        ts = etree.SubElement(root, f"{{{P}}}textStyles")
-        for style_name, sz in [("titleStyle", "4400"), ("bodyStyle", "2800"), ("otherStyle", "1800")]:
-            lvl = etree.SubElement(ts, f"{{{P}}}{style_name}")
-            lvl1 = etree.SubElement(lvl, f"{{{P}}}lvl1pPr")
-            def_rpr = etree.SubElement(lvl1, f"{{{A}}}defRPr")
-            def_rpr.set("sz", sz)
-            def_rpr.set("kern", "1200")
-            sf = etree.SubElement(def_rpr, f"{{{A}}}solidFill")
-            sc = etree.SubElement(sf, f"{{{A}}}schemeClr")
-            sc.set("val", "tx1")
-            etree.SubElement(def_rpr, f"{{{A}}}latin").set("typeface", "+mn-lt")
-            etree.SubElement(def_rpr, f"{{{A}}}ea").set("typeface", "+mn-ea")
-        return etree.tostring(root, xml_declaration=True, encoding="UTF-8", standalone=True)
-
     def ensure_master(
         self,
         src_zip: zipfile.ZipFile,
@@ -193,7 +174,7 @@ class LayoutManager:
         raw_hash = hashlib.sha256(raw_content).hexdigest()
         is_new = raw_hash not in self._master_hashes
 
-        content = self._ensure_text_styles(raw_content)
+        content = raw_content
         if not is_new:
             out_master_path = self._master_hashes[raw_hash]
         else:
@@ -249,7 +230,7 @@ class LayoutManager:
                             start=os.path.dirname(out_master_path),
                         )
                         rel.set("Target", new_target)
-                elif self._media_manager and rel_type in DIAGRAM_REL_TYPES:
+                elif self._diagram_manager and rel_type in DIAGRAM_REL_TYPES:
                     diag_abs = os.path.normpath(
                         os.path.join(
                             os.path.dirname(src_master_path), old_target
@@ -258,14 +239,15 @@ class LayoutManager:
                     if diag_abs in src_zip.namelist():
                         ext = os.path.splitext(old_target)[1].lower()
                         diag_content = src_zip.read(diag_abs)
-                        diag_ct = None
-                        for dk, dv in REL_TYPES.items():
-                            if dv == rel_type and dk in DIAGRAM_CONTENT_TYPES:
-                                diag_ct = DIAGRAM_CONTENT_TYPES[dk]
-                                break
-                        new_name = self._media_manager.add_media(diag_content, ext, prefix="diagram", content_type=diag_ct)
+                        new_name = self._diagram_manager.add_diagram(
+                            rel_type,
+                            diag_content,
+                            ext,
+                            preferred_name=os.path.basename(old_target),
+                            allow_existing=self._diagram_manager.is_base_zip(src_zip),
+                        )
                         new_target = os.path.relpath(
-                            f"ppt/media/{new_name}",
+                            f"ppt/diagrams/{new_name}",
                             start=os.path.dirname(out_master_path),
                         )
                         rel.set("Target", new_target)
