@@ -156,3 +156,86 @@ def test_unknown_part_graph_is_copied_from_non_base_source(tmp_path):
 
         names = [info.filename for info in z.filelist]
         assert len(names) == len(set(names))
+
+
+def test_internal_slide_links_are_not_copied_as_part_graph_dependencies(tmp_path):
+    base_source = tmp_path / "base_source.pptx"
+    linked_source = tmp_path / "linked_source.pptx"
+    _make_chart_source(str(base_source))
+
+    with zipfile.ZipFile(base_source) as z:
+        entries = {info.filename: z.read(info.filename) for info in z.infolist()}
+
+    pres_rels = etree.fromstring(entries["ppt/_rels/presentation.xml.rels"])
+    rel = etree.SubElement(pres_rels, "Relationship")
+    rel.set("Id", "rId257")
+    rel.set("Type", "http://schemas.openxmlformats.org/officeDocument/2006/relationships/slide")
+    rel.set("Target", "slides/slide2.xml")
+    entries["ppt/_rels/presentation.xml.rels"] = etree.tostring(
+        pres_rels, xml_declaration=True, encoding="UTF-8", standalone=True
+    )
+
+    pres = etree.fromstring(entries["ppt/presentation.xml"])
+    sld_id_lst = pres.find(f"{{{P_NS}}}sldIdLst")
+    sld_id = etree.SubElement(sld_id_lst, f"{{{P_NS}}}sldId")
+    sld_id.set("id", "257")
+    sld_id.set(f"{{{R_NS}}}id", "rId257")
+    entries["ppt/presentation.xml"] = etree.tostring(
+        pres, xml_declaration=True, encoding="UTF-8", standalone=True
+    )
+
+    slide = etree.Element(f"{{{P_NS}}}sld", nsmap={None: P_NS, "a": A_NS, "r": R_NS})
+    c_sld = etree.SubElement(slide, f"{{{P_NS}}}cSld")
+    sp_tree = etree.SubElement(c_sld, f"{{{P_NS}}}spTree")
+    marker = etree.SubElement(sp_tree, f"{{{P_NS}}}sp")
+    marker.set("name", "unselected")
+    entries["ppt/slides/slide2.xml"] = etree.tostring(
+        slide, xml_declaration=True, encoding="UTF-8", standalone=True
+    )
+
+    slide2_rels = _rels_root()
+    rel = etree.SubElement(slide2_rels, "Relationship")
+    rel.set("Id", "rId1")
+    rel.set("Type", "http://schemas.openxmlformats.org/officeDocument/2006/relationships/slideLayout")
+    rel.set("Target", "../slideLayouts/slideLayout1.xml")
+    entries["ppt/slides/_rels/slide2.xml.rels"] = etree.tostring(
+        slide2_rels, xml_declaration=True, encoding="UTF-8", standalone=True
+    )
+
+    slide1_rels = etree.fromstring(entries["ppt/slides/_rels/slide1.xml.rels"])
+    rel = etree.SubElement(slide1_rels, "Relationship")
+    rel.set("Id", "rId99")
+    rel.set("Type", "http://schemas.openxmlformats.org/officeDocument/2006/relationships/slide")
+    rel.set("Target", "slide2.xml")
+    entries["ppt/slides/_rels/slide1.xml.rels"] = etree.tostring(
+        slide1_rels, xml_declaration=True, encoding="UTF-8", standalone=True
+    )
+
+    ct_root = etree.fromstring(entries["[Content_Types].xml"])
+    elem = etree.SubElement(ct_root, f"{{{CT_NS}}}Override")
+    elem.set("PartName", "/ppt/slides/slide2.xml")
+    elem.set("ContentType", "application/vnd.openxmlformats-officedocument.presentationml.slide+xml")
+    entries["[Content_Types].xml"] = etree.tostring(
+        ct_root, xml_declaration=True, encoding="UTF-8", standalone=True
+    )
+
+    with zipfile.ZipFile(linked_source, "w", zipfile.ZIP_DEFLATED) as z:
+        for name, data in entries.items():
+            z.writestr(name, data)
+
+    output = tmp_path / "output.pptx"
+    merge(
+        ProposalConfig(
+            output_path=str(output),
+            sources=[
+                SlideSource(pptx_path="tests/fixtures/simple.pptx", pages=[1]),
+                SlideSource(pptx_path=str(linked_source), pages=[1]),
+            ],
+        )
+    )
+
+    with zipfile.ZipFile(output) as z:
+        names = [info.filename for info in z.filelist]
+        assert len(names) == len(set(names))
+        slide2_xml = z.read("ppt/slides/slide2.xml")
+        assert b"unselected" not in slide2_xml

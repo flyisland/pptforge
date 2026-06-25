@@ -9,6 +9,7 @@ from pptforge.constants import (
     DIAGRAM_REL_TYPES,
     MEDIA_CONTENT_TYPES,
     MEDIA_REL_TYPES,
+    REL_TYPES,
 )
 from pptforge.media import DiagramManager, MediaManager
 
@@ -39,6 +40,17 @@ class PartGraphCopier:
         self.files: dict[str, bytes] = {}
         self.content_type_defaults: dict[str, str] = {}
         self.content_type_overrides: dict[str, str] = {}
+
+    MANAGED_REL_TYPES = {
+        REL_TYPES["slide"],
+        REL_TYPES["slideLayout"],
+        REL_TYPES["slideMaster"],
+        REL_TYPES["notesSlide"],
+        REL_TYPES["notesMaster"],
+        REL_TYPES["theme"],
+        REL_TYPES["presProps"],
+        REL_TYPES["tags"],
+    }
 
     def copy_part(
         self,
@@ -88,6 +100,9 @@ class PartGraphCopier:
 
         src_child_path = self._resolve_target(src_parent_part, target)
         if src_child_path not in src_zip.namelist():
+            return None
+
+        if rel_type in self.MANAGED_REL_TYPES:
             return None
 
         if rel_type in MEDIA_REL_TYPES:

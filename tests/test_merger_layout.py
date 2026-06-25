@@ -75,6 +75,17 @@ def _copy_with_master_id(
             dst_zip.writestr(item, data)
 
 
+def _copy_with_layout_xml(src: str, dst: str, layout_xml: bytes) -> None:
+    with zipfile.ZipFile(src, "r") as src_zip, zipfile.ZipFile(
+        dst, "w", zipfile.ZIP_DEFLATED
+    ) as dst_zip:
+        for item in src_zip.infolist():
+            data = src_zip.read(item.filename)
+            if item.filename == "ppt/slideLayouts/slideLayout1.xml":
+                data = layout_xml
+            dst_zip.writestr(item, data)
+
+
 def test_multi_master_merge(tmp_path):
     output = str(tmp_path / "output.pptx")
     proposal = ProposalConfig(
@@ -187,3 +198,59 @@ def test_master_and_layout_ids_are_globally_unique(tmp_path):
                 )
 
     assert len(ids) == len(set(ids))
+
+
+def test_identical_layout_xml_under_different_master_is_not_reused(tmp_path):
+    master_a = tmp_path / "master_a_with_layout_rel.pptx"
+    master_b_with_ids = tmp_path / "master_b_with_layout_rel.pptx"
+    master_b = tmp_path / "master_b_same_layout.pptx"
+    _copy_with_master_id(
+        "tests/fixtures/master_a.pptx",
+        str(master_a),
+        2147483661,
+        layout_ids=[2147483662],
+    )
+    _copy_with_master_id(
+        "tests/fixtures/master_b.pptx",
+        str(master_b_with_ids),
+        2147483682,
+        layout_ids=[2147483663],
+    )
+    with zipfile.ZipFile(master_a) as z:
+        layout_xml = z.read("ppt/slideLayouts/slideLayout1.xml")
+    _copy_with_layout_xml(
+        str(master_b_with_ids),
+        str(master_b),
+        layout_xml,
+    )
+
+    output = str(tmp_path / "output.pptx")
+    proposal = ProposalConfig(
+        output_path=output,
+        sources=[
+            SlideSource(pptx_path=str(master_a), pages=[1]),
+            SlideSource(pptx_path=str(master_b), pages=[1]),
+        ],
+    )
+    merge(proposal)
+
+    with zipfile.ZipFile(output) as z:
+        master2_rels = etree.fromstring(
+            z.read("ppt/slideMasters/_rels/slideMaster2.xml.rels")
+        )
+        master2_layout_targets = [
+            rel.get("Target")
+            for rel in master2_rels
+            if rel.get("Type", "").endswith("/slideLayout")
+        ]
+        assert master2_layout_targets == ["../slideLayouts/slideLayout2.xml"]
+
+        layout2_rels = etree.fromstring(
+            z.read("ppt/slideLayouts/_rels/slideLayout2.xml.rels")
+        )
+        layout2_master_targets = [
+            rel.get("Target")
+            for rel in layout2_rels
+            if rel.get("Type", "").endswith("/slideMaster")
+        ]
+        assert layout2_master_targets == ["../slideMasters/slideMaster2.xml"]

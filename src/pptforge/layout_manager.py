@@ -20,7 +20,7 @@ class LayoutManager:
         media_manager: "MediaManager | None" = None,
         diagram_manager: DiagramManager | None = None,
     ):
-        self._layout_hashes: dict[str, str] = {}
+        self._layout_hashes: dict[tuple[str, str, str, str], str] = {}
         self._master_hashes: dict[str, str] = {}
         self._theme_hashes: dict[str, str] = {}
         self._layout_counter: int = 1
@@ -44,8 +44,7 @@ class LayoutManager:
                 and "_rels" not in name
             ):
                 content = base_zip.read(name)
-                h = hashlib.sha256(content).hexdigest()
-                self._layout_hashes[h] = name
+                self._layout_hashes[self._layout_key(base_zip, name, content)] = name
                 num = int(
                     name.replace("ppt/slideLayouts/slideLayout", "").replace(
                         ".xml", ""
@@ -139,6 +138,60 @@ class LayoutManager:
         if value >= self._next_master_layout_id:
             self._next_master_layout_id = value + 1
 
+    def _layout_key(
+        self,
+        src_zip: zipfile.ZipFile,
+        src_layout_path: str,
+        content: bytes,
+    ) -> tuple[str, str, str, str]:
+        layout_hash = hashlib.sha256(content).hexdigest()
+        rels_data = self._part_rels_data(src_zip, src_layout_path)
+        rels_hash = hashlib.sha256(rels_data).hexdigest() if rels_data else ""
+        master_hash = self._layout_master_hash(src_zip, src_layout_path, rels_data)
+        source_id = src_zip.filename or ""
+        return (source_id, layout_hash, rels_hash, master_hash)
+
+    @staticmethod
+    def _part_rels_path(part_path: str) -> str:
+        return (
+            part_path.replace(
+                "ppt/slideLayouts/", "ppt/slideLayouts/_rels/"
+            )
+            + ".rels"
+        )
+
+    def _part_rels_data(
+        self,
+        src_zip: zipfile.ZipFile,
+        src_layout_path: str,
+    ) -> bytes | None:
+        rels_path = self._part_rels_path(src_layout_path)
+        if rels_path not in src_zip.namelist():
+            return None
+        return src_zip.read(rels_path)
+
+    def _layout_master_hash(
+        self,
+        src_zip: zipfile.ZipFile,
+        src_layout_path: str,
+        rels_data: bytes | None,
+    ) -> str:
+        if rels_data is None:
+            return ""
+
+        root = etree.fromstring(rels_data)
+        for rel in root:
+            if rel.get("Type", "") != REL_TYPES["slideMaster"]:
+                continue
+            old_target = rel.get("Target", "")
+            src_master_path = os.path.normpath(
+                os.path.join(os.path.dirname(src_layout_path), old_target)
+            )
+            if src_master_path in src_zip.namelist():
+                return hashlib.sha256(src_zip.read(src_master_path)).hexdigest()
+            return src_master_path
+        return ""
+
     def _allocate_master_layout_id(self, preferred: int | None = None) -> int:
         if preferred is not None and preferred not in self._used_master_layout_ids:
             self._reserve_master_layout_id(preferred)
@@ -176,24 +229,21 @@ class LayoutManager:
     ) -> str:
         src_layout_path = os.path.normpath(src_layout_path)
         content = src_zip.read(src_layout_path)
-        h = hashlib.sha256(content).hexdigest()
-        is_new = h not in self._layout_hashes
+        layout_key = self._layout_key(src_zip, src_layout_path, content)
+        is_new = layout_key not in self._layout_hashes
 
         if is_new:
             out_layout_path = (
                 f"ppt/slideLayouts/slideLayout{self._layout_counter}.xml"
             )
             self._layout_counter += 1
-            self._layout_hashes[h] = out_layout_path
+            self._layout_hashes[layout_key] = out_layout_path
         else:
-            out_layout_path = self._layout_hashes[h]
+            out_layout_path = self._layout_hashes[layout_key]
+            if out_layout_path in self.files:
+                return out_layout_path
 
-        layout_rels_path = (
-            src_layout_path.replace(
-                "ppt/slideLayouts/", "ppt/slideLayouts/_rels/"
-            )
-            + ".rels"
-        )
+        layout_rels_path = self._part_rels_path(src_layout_path)
 
         if layout_rels_path in src_zip.namelist():
             rels_data = src_zip.read(layout_rels_path)

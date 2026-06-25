@@ -54,7 +54,10 @@ proposal.yaml
 `LayoutManager.__init__(src_zip)`
 
 扫描第一个 source 的 `ppt/slideLayouts/`、`ppt/slideMasters/`、`ppt/theme/`，
-计算每个文件的 SHA256 哈希。这些哈希用于后续迁移时跳过重复内容。
+计算每个文件的身份键。这些键用于后续迁移时跳过重复内容。
+其中 slideLayout 不能只按 XML 内容去重：同一份 layout XML 如果挂在不同
+slideMaster 下，仍然必须作为不同 part 复制，否则 master 的 `sldLayoutIdLst`
+会指向一个反向关系属于其他 master 的 layout，PowerPoint 会在打开时 repair。
 
 同时读取第一个 source 的 `presentation.xml` 与 `presentation.xml.rels`，建立
 `slideMaster path → sldMasterId/@id` 映射；并从所有 base master 中收集
@@ -182,7 +185,7 @@ os.replace(tmp_path, proposal.output_path)
 
 | 注册表 | 范围 |
 |--------|------|
-| `_layout_hashes` | slideLayout SHA256 → 输出路径 |
+| `_layout_hashes` | slideLayout 身份键 → 输出路径。身份键包含 source、layout XML、layout `_rels`、所属 master |
 | `_master_hashes` | slideMaster SHA256 → 输出路径 |
 | `_theme_hashes` | theme SHA256 → 输出路径 |
 | `master_ids` | 输出 slideMaster 路径 → `sldMasterId/@id` |
@@ -192,7 +195,8 @@ os.replace(tmp_path, proposal.output_path)
 
 ```
 ensure_layout(源 layout 路径)
- ├─ 读取内容，计算哈希 → 已存在 → 返回已有路径
+ ├─ 读取内容，计算身份键
+ ├─ 已处理过同一身份键 → 返回已有路径
  ├─ 读取 _rels
  ├─ 针对每个 master rel → ensure_master()
  │                       ├─ 读取内容，计算哈希 → 已存在 → 返回已有路径
@@ -208,8 +212,13 @@ ensure_layout(源 layout 路径)
  └─ 返回新 layout 路径
 ```
 
-此递归处理 layout 与 master 之间的交叉引用。每个文件按 SHA256 去重，
-确保每个唯一内容只处理一次，不会无限递归。
+此递归处理 layout 与 master 之间的交叉引用。master/theme 仍按 XML SHA256
+去重；layout 使用更保守的身份键去重，因为 layout part 的合法归属取决于
+`.rels` 中的 slideMaster 反向关系，而不只是 layout XML 字节。
+
+第一个 source 的 layout XML 会从骨架复制，但 `ppt/slideLayouts/_rels/` 会被
+跳过并由 LayoutManager 重建。因此缓存命中不等于可以直接返回：只有该输出
+layout 已经写入过 LayoutManager.files 时才跳过；否则仍需写出它的 `_rels`。
 
 ### Master / Layout 全局 id 分配
 
@@ -256,6 +265,9 @@ slide.xml.rels 中未知 internal rel
 规则：
 
 - 外部关系（`TargetMode="External"`、URL、fragment）原样保留。
+- presentation 管理的关系不走通用递归复制，包括 `slide`、`slideLayout`、
+  `slideMaster`、`notesSlide`、`notesMaster`、`theme`、`presProps`、`tags`。
+  这些关系要么已有专项逻辑，要么是页间跳转/全局结构，不能被当作对象依赖复制。
 - 目标路径已被占用时，使用 `_2`、`_3` 等后缀生成新路径。
 - 同一源 part 被多个 slide 引用时，通过 `(source package, source path)` 缓存复用同一个输出路径。
 - 子关系如果是 media 或 diagram，仍委托 `MediaManager` / `DiagramManager`，保持已有去重和 SmartArt 分组策略。
