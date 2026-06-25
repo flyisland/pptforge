@@ -1,6 +1,16 @@
 # pptforge
 
+![pptforge 工作流插图](pptforge-readme-illustration.png)
+
 PPTX 页面提取与合成工具。从多个 PPTX 源文件中提取指定页面，无损合成为一个新的演示文稿。
+
+售前、解决方案、产品市场等团队经常要为不同客户和场景制作新的 PPTX。很多时候，只有少部分页面是新写的，大部分内容都来自已有素材，例如产品介绍、行业方案、案例库和技术架构说明。
+
+手工复制的问题在于，页面进入下游 PPTX 后就和原始素材失去了关系。上游素材更新了，下游文件不会自动同步；下游文件被直接修改后，也很难判断它和素材库谁才是最新版本。
+
+![PPTX 手工复用的问题](pptforge-problem-illustration.png)
+
+pptforge 的目标是让团队把 PPTX 素材维护成一份权威的“主数据”，再在此基础上组装不同场景的交付文件。交付用 PPTX 可以从最新素材重新生成，而不是在一份份手工拷贝中逐渐过期。
 
 ## 安装
 
@@ -28,8 +38,8 @@ uv run pptforge --help
 @tag-end: CI/CD
 ```
 
-- `@tags` — 单页 tag（逗号分隔）
-- `@tag-start` / `@tag-end` — 范围 tag（支持嵌套和交叉）
+- `@tags` — 单页 tag（逗号分隔）。常用于指定少数页面。
+- `@tag-start` / `@tag-end` — 范围 tag（支持嵌套和交叉）。用一头一尾包含一组页面，可自动适应页面数量的变更。
 - 其他 `@` 开头的字段被忽略
 
 Tag 范围通过配对 start/end 标记计算。未配对的 `@tag-start` 会自动结束前面的未闭合范围。文件末尾未闭合的范围会报错。
@@ -42,13 +52,13 @@ description: 客户A初次拜访，侧重DevOps转型
 output: ./output/客户A_20240715.pptx
 
 slides:
-  - ./定制页.pptx:1
-  - ./sources/gitlab.pptx[CI/CD]
-  - ./sources/gitlab.pptx[CI/CD, Pipeline]:1-3
-  - ./sources/gitlab.pptx[CI/CD]:-1
-  - ./sources/cases_fin.pptx:3, 5
+  - ./定制页.pptx:1 # 首页
+  - ./sources/gitlab.pptx[CI/CD] # 取 tag=CI/CD 的所有页面
+  - ./sources/gitlab.pptx[CI/CD, Pipeline]  # tag=CI/CD or tag=Pipeline 的页面合集
+  - ./sources/gitlab.pptx[CI/CD]:-1 # tag=CI/CD 的页面集的最后一页
+  - ./sources/cases_fin.pptx:3, 5 # 该文件的第3和第5页
   - ./sources/kubernetes.pptx:3-7
-  - ./定制页.pptx:-1
+  - ./定制页.pptx:-1 # 最后一页
 ```
 
 **源表达式语法**: `source[tag1, tag2, ...]:range1, range2, ...`
