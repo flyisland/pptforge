@@ -21,11 +21,14 @@
 | **音频** (mp3/wav/m4a) | 路径重写 |
 | **超链接** | 关系条目原样保留（URL 不依赖路径） |
 | **幻灯片布局 (SlideLayout)** | 跨源迁移，SHA256 去重，递归迁移母版和主题 |
-| **幻灯片母版 (SlideMaster)** | 跨源迁移，SHA256 去重，自动注入 `textStyles` 防止修复提示 |
+| **幻灯片母版 (SlideMaster)** | 跨源迁移，SHA256 去重，处理 master/layout 全局 id |
 | **主题 (Theme)** | 跨源迁移，SHA256 去重 |
 | **备注页 (Notes Slide)** | 按输出索引重编号，重写关系路径 |
 | **自定义标签 (Tags)** | 重命名为 `tag{index}_{original}` 并复制 |
 | **批注格式的图表/图表样式** | 通过通用 `diagramData` 关系处理 |
+| **未知 internal relationship 的依赖文件** | 通过 `PartGraphCopier` 递归复制 part graph，并继承 Content-Type |
+| **图表 (Charts)** | 通过 `PartGraphCopier` 复制 chart XML 及其 workbook/style 等关系链 |
+| **嵌入 OLE / package 对象** | 通过 `PartGraphCopier` 复制 relationship 可达的 `ppt/embeddings/` 文件 |
 
 ---
 
@@ -46,31 +49,28 @@
 
 ---
 
-## ❌ 不支持（非首个源文件会损坏或丢失）
+## ⚠️ 通用复制但未专项语义合并
 
-以下特性在非首个源文件中**没有处理对应的关系类型和文件**，会导致功能损坏或丢失：
+以下特性现在会通过 `PartGraphCopier` 尝试复制 relationship 可达的文件，
+但如果对象还依赖 presentation 级全局注册、全局 id 或应用状态，仍可能需要后续专项策略：
 
-| 特性 | 缺失的关系类型 | 影响 |
+| 特性 | 关系类型/路径 | 当前状态 |
 |---|---|---|
-| **图表 (Charts)** | `chart` | 图表 XML 和二进制数据未复制，图表显示为占位符或空白 |
-| **嵌入 OLE 对象** (Excel / PDF / Word 等) | `oleObject`、`package` | `ppt/embeddings/` 未复制，嵌入对象丢失 |
-| **ActiveX 控件** | `control` | 控件丢失 |
-| **批注与评论** | `comments`、`commentAuthors` | 非首个源文件的批注丢失 |
-| **自定义 XML 数据绑定** | `customXml`、`customXmlProps` | 自定义 XML 部件丢失 |
+| **ActiveX 控件** | `control` | 可复制关系图；控件全局状态未专项合并 |
+| **批注与评论** | `comments`、`commentAuthors` | 可复制关系图；作者列表/全局合并未专项处理 |
+| **自定义 XML 数据绑定** | `customXml`、`customXmlProps` | 可复制关系图；语义合并未专项处理 |
 | **数字签名** | `_xmlsignatures/` | 签名损坏 |
-| **幻灯片更新信息** | `slideUpdateInfo` | 更新信息丢失 |
-| **墨迹注释 / 笔迹** | `ink`（外部文件） | 外部墨迹文件未处理（内联墨迹保留在 XML 中） |
-| **打印机设置** | `printerSettings` | 打印设置丢失 |
+| **幻灯片更新信息** | `slideUpdateInfo` | 可复制关系图；更新语义未专项处理 |
+| **墨迹注释 / 笔迹** | `ink`（外部文件） | internal part 可复制；外部目标原样保留 |
+| **打印机设置** | `printerSettings` | 可复制关系图；presentation 级设置未专项合并 |
 | **备注母版 (Notes Master)** | 硬编码为 `notesMaster1.xml` | 自定义备注母版不会迁移 |
 | **广播 / 在线演示设置** | — | 未处理 |
-
-> 注意：如果上述特性只出现在**第一个源文件**中，则保留；只有**非首个源文件**包含它们时才会丢失。
 
 ---
 
 ## 🔧 已知问题
 
-- **"发现内容问题"修复对话框**：特定源文件组合（如 `gitlab + LLM` 一起合并）触发 PowerPoint 修复提示，LibreOffice 打开正常。根因尚未定位。
+- `PartGraphCopier` 复制的是 relationship 可达闭包，不会自动理解所有 Office 对象的应用级语义。若某类对象依赖 presentation 级注册表，仍需要添加专项策略。
 
 ---
 
@@ -90,20 +90,22 @@
 - `hyperlink` ✅ — 不修改路径
 - `diagramData` / `diagramDrawing` / `diagramColors` / `diagramQuickStyle` / `diagramLayout` ✅
 
-未定义（非首个源文件受影响）：
+未定义但由 `PartGraphCopier` fallback 递归复制：
 
-- `chart` ❌
-- `oleObject` ❌
-- `package` ❌
-- `control` ❌
-- `comments` ❌
-- `commentAuthors` ❌
-- `customXml` ❌
-- `customXmlProps` ❌
-- `slideUpdateInfo` ❌
+- `chart` ✅ fallback
+- `oleObject` ✅ fallback
+- `package` ✅ fallback
+- `control` ✅ fallback
+- `comments` ✅ fallback
+- `commentAuthors` ✅ fallback
+- `customXml` ✅ fallback
+- `customXmlProps` ✅ fallback
+- `slideUpdateInfo` ✅ fallback
 
 ---
 
 ## 📝 总结
 
-pptforge 的"透传"设计确保了**幻灯片正文内容**的完整性，但在**跨源文件合并场景**下，对需要额外文件支持的嵌入对象（图表、OLE、评论、宏等）存在明显的功能缺失。如果工作流中只有单个源文件，所有特性均正常工作；多源合并时，依赖非首个源文件中嵌入对象的特性将不可用。
+pptforge 的"透传"设计确保了**幻灯片正文内容**的完整性。跨源文件合并时，
+已知的 layout/master/media/diagram/notes/tags 走专项迁移；其他 internal
+relationship 通过 `PartGraphCopier` 默认复制依赖闭包。对于依赖全局注册表或应用级状态的对象，后续仍可继续补充专项策略。

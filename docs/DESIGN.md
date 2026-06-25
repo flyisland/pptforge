@@ -103,7 +103,8 @@ for src_path, src_slide_path in all_slides:
 | `slideLayout` | `LayoutManager.ensure_layout()` → 递归迁移 → 改写 Target |
 | `notesSlide` | 逐字节复制 notesSlide XML，按当前输出序号重编号 |
 | `tags` | 逐字节复制 tag XML，重命名为 `tag{dst_index}_{原始名称}`，改写 Target |
-| `hyperlink`，其他 | 不动 |
+| `hyperlink` / `TargetMode="External"` | 不动 |
+| 其他 internal relationship | `PartGraphCopier.copy_related_part()` → 递归复制目标 part 及其 `_rels`，必要时重命名并改写 Target |
 
 slide XML（`ppt/slides/slideN.xml`）**始终**逐字节复制——绝不解析。
 
@@ -126,6 +127,10 @@ LayoutManager.files → ppt/slideLayouts/slideLayoutN.xml
                       ppt/slideMasters/slideMasterN.xml
                       ppt/slideMasters/_rels/slideMasterN.xml.rels
                       ppt/theme/themeN.xml
+PartGraphCopier.files → ppt/charts/chartN.xml
+                        ppt/charts/_rels/chartN.xml.rels
+                        ppt/embeddings/...
+                        其他由未知 internal relationship 递归发现的 part
 ```
 
 ### 第 7 步 — 重写 `ppt/presentation.xml`
@@ -157,6 +162,7 @@ LayoutManager.files → ppt/slideLayouts/slideLayoutN.xml
 - 为每个迁移的 layout / master / theme 添加 `<Override>`
 - 为未注册的媒体扩展名添加 `<Default>`
 - 为每个新增的 diagram part 添加 `<Override>`（diagram 使用 Override，不依赖通用 `.xml` Default）
+- 为 `PartGraphCopier` 复制的未知 part 继承源文件中的 `<Default>` 或 `<Override>`
 
 ### 第 10 步 — 原子写入
 
@@ -228,6 +234,35 @@ LayoutManager 的规则：
 
 Theme 按 SHA256 去重，但本身没有 _rels 需要改写（无进一步依赖），
 所以 `_ensure_theme()` 只是复制 XML 并返回新路径。
+
+---
+
+## 通用 Part Graph 复制
+
+`PartGraphCopier` 是未知 internal relationship 的兜底迁移层。它不解析 slide XML，
+只从当前 part 的 `.rels` 出发递归复制包内依赖：
+
+```
+slide.xml.rels 中未知 internal rel
+  → copy_part(target)
+      ├─ 复制 target part
+      ├─ 读取 target 的 _rels
+      ├─ 对每个 internal child 递归 copy_part(child)
+      ├─ 若 child 路径冲突则分配 suffix 路径
+      ├─ 改写 target rels 中的 Target
+      └─ 记录源 Content-Type 到输出 [Content_Types].xml
+```
+
+规则：
+
+- 外部关系（`TargetMode="External"`、URL、fragment）原样保留。
+- 目标路径已被占用时，使用 `_2`、`_3` 等后缀生成新路径。
+- 同一源 part 被多个 slide 引用时，通过 `(source package, source path)` 缓存复用同一个输出路径。
+- 子关系如果是 media 或 diagram，仍委托 `MediaManager` / `DiagramManager`，保持已有去重和 SmartArt 分组策略。
+- 通用复制只负责 part graph 闭包；需要全局注册或 id 修复的对象仍应通过专门策略处理。
+
+这使 chart、embedded workbook、OLE package、comments 等新对象类型不需要先加入
+`REL_TYPES` 白名单，也能从非首个 source 复制其依赖文件。
 
 ---
 
@@ -333,6 +368,7 @@ Tag 范围计算（`_compute_tags`）：
 | SHA256 去重 layout / master / theme | 多个 source 往往共享相同设计模板。哈希去重避免冗余副本，也避免重复注册导致的 rId 冲突。 |
 | master/layout id 全局唯一 | PowerPoint 将 `sldMasterId/@id` 与 `sldLayoutId/@id` 视作同一全局空间。跨源重复会触发 repair，所以迁移 master 时必须保留不冲突 id，并为冲突 id 重新分配。 |
 | diagram part 不做独立哈希去重 | SmartArt 由多个相互匹配的 diagram part 组成。独立去重会混用不同组的 data / drawing / style，导致 PowerPoint 修复内容。 |
+| 未知 internal relationship 递归复制 | OOXML 对象常由 part graph 表达。默认复制依赖闭包比静态白名单更稳健，新增对象类型不应天然断链。 |
 | Tag 顺序决定页面顺序 | 用户写 `[implementation, code-review]` 预期 implementaion 页面在前。`_get_tagged_pages()` 按 source.tags 顺序遍历，不按字母排序。 |
 | `.tmp` + `os.replace()` | 原子写入。合并中途崩溃不会留下损坏的 `.pptx`，最多残留一个 `.tmp` 文件，会被清理。 |
 | 先校验再写入 | 所有静态检查（文件存在、输出目录）和内容检查（tag 一致性）在 `ZipFile` 打开写入之前完成。尽早失败，不写任何东西。 |

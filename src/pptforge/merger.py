@@ -5,6 +5,7 @@ from lxml import etree
 from pptforge.models import ProposalConfig
 from pptforge.media import DiagramManager, MediaManager
 from pptforge.layout_manager import LayoutManager
+from pptforge.part_graph import PartGraphCopier
 from pptforge.constants import (
     RELS_NS,
     CONTENT_TYPES_NS,
@@ -33,7 +34,7 @@ def _get_slide_paths(src_zip: zipfile.ZipFile) -> list[str]:
     return slides
 
 
-def _copy_skeleton(src_zip: zipfile.ZipFile, dst_zip: zipfile.ZipFile) -> None:
+def _copy_skeleton(src_zip: zipfile.ZipFile, dst_zip: zipfile.ZipFile) -> set[str]:
     skip_prefixes = (
         "ppt/slides/",
         "ppt/notesSlides/",
@@ -48,11 +49,14 @@ def _copy_skeleton(src_zip: zipfile.ZipFile, dst_zip: zipfile.ZipFile) -> None:
         "docProps/app.xml",
         "docProps/core.xml",
     )
+    copied_paths: set[str] = set()
     for name in src_zip.namelist():
         if any(name.startswith(p) for p in skip_prefixes):
             continue
         data = src_zip.read(name)
         dst_zip.writestr(name, data)
+        copied_paths.add(name)
+    return copied_paths
 
 
 def _register_slides(
@@ -202,7 +206,7 @@ def merge(proposal: ProposalConfig) -> None:
             diagram_manager: DiagramManager | None = None
             src = proposal.sources[0]
             with zipfile.ZipFile(src.pptx_path, "r") as src_zip:
-                _copy_skeleton(src_zip, dst_zip)
+                copied_paths = _copy_skeleton(src_zip, dst_zip)
                 src_presentation_xml = src_zip.read("ppt/presentation.xml")
                 src_presentation_rels = src_zip.read(
                     "ppt/_rels/presentation.xml.rels"
@@ -211,6 +215,12 @@ def merge(proposal: ProposalConfig) -> None:
                 diagram_manager = DiagramManager(src_zip)
                 layout_manager = LayoutManager(
                     src_zip, media_manager, diagram_manager
+                )
+                part_graph_copier = PartGraphCopier(
+                    base_filename=src_zip.filename,
+                    used_paths=copied_paths,
+                    media_manager=media_manager,
+                    diagram_manager=diagram_manager,
                 )
 
             all_slides = []
@@ -240,6 +250,7 @@ def merge(proposal: ProposalConfig) -> None:
                         media_manager=media_manager,
                         diagram_manager=diagram_manager,
                         layout_manager=layout_manager,
+                        part_graph_copier=part_graph_copier,
                         dst_zip=dst_zip,
                         notes_slide_indices=notes_slide_indices,
                     )
@@ -267,6 +278,9 @@ def merge(proposal: ProposalConfig) -> None:
 
             for name, content in diagram_manager.files.items():
                 dst_zip.writestr(f"ppt/diagrams/{name}", content)
+
+            for name, content in part_graph_copier.files.items():
+                dst_zip.writestr(name, content)
 
             # Identify new masters/themes from layout_manager (non-first-source)
             existing_master_paths: set[str] = set()
@@ -413,6 +427,17 @@ def merge(proposal: ProposalConfig) -> None:
                     new_overrides.append({"PartName": part_name, "ContentType": ct_obj})
                     existing_overrides.add(part_name)
 
+            for ext, ct_obj in part_graph_copier.content_type_defaults.items():
+                ext = ext.lower()
+                if ext and ext not in existing_defaults:
+                    new_defaults.append({"Extension": ext, "ContentType": ct_obj})
+                    existing_defaults.add(ext)
+
+            for part_name, ct_obj in part_graph_copier.content_type_overrides.items():
+                if part_name not in existing_overrides:
+                    new_overrides.append({"PartName": part_name, "ContentType": ct_obj})
+                    existing_overrides.add(part_name)
+
             # Rebuild ct_root with all Defaults first, then all Overrides
             defaults = [child for child in ct_root if child.tag == f"{{{CONTENT_TYPES_NS}}}Default"]
             overrides = [child for child in ct_root if child.tag == f"{{{CONTENT_TYPES_NS}}}Override"]
@@ -471,6 +496,7 @@ def _copy_slide(
     media_manager: MediaManager,
     diagram_manager: DiagramManager,
     layout_manager: LayoutManager | None,
+    part_graph_copier: PartGraphCopier | None,
     dst_zip: zipfile.ZipFile,
     notes_slide_indices: set[int] | None = None,
 ) -> set[str]:
@@ -591,6 +617,17 @@ def _copy_slide(
                         allow_existing=diagram_manager.is_base_zip(src_zip),
                     )
                     target_mapping[old_target] = f"../diagrams/{diag_name}"
+
+            elif part_graph_copier and rel.get("TargetMode") != "External":
+                new_target = part_graph_copier.copy_related_part(
+                    src_zip,
+                    src_slide_path,
+                    f"ppt/slides/slide{dst_slide_index}.xml",
+                    rel_type,
+                    old_target,
+                )
+                if new_target:
+                    target_mapping[old_target] = new_target
 
         if target_mapping:
             for rel in root:
