@@ -1,24 +1,24 @@
 import os
 import zipfile
+
 from lxml import etree
 
-from pptforge.models import ProposalConfig
-from pptforge.media import DiagramManager, MediaManager
-from pptforge.layout_manager import LayoutManager
-from pptforge.part_graph import PartGraphCopier
+from pptforge.config import resolve_source_pages
 from pptforge.constants import (
-    RELS_NS,
     CONTENT_TYPES_NS,
+    DIAGRAM_REL_TYPES,
+    LAYOUT_REL_TYPES,
+    MEDIA_CONTENT_TYPES,
+    MEDIA_REL_TYPES,
     P_NS,
     R_NS,
     REL_TYPES,
-    MEDIA_REL_TYPES,
-    MEDIA_CONTENT_TYPES,
-    LAYOUT_REL_TYPES,
-    DIAGRAM_REL_TYPES,
 )
-from pptforge.config import resolve_source_pages
 from pptforge.extractor import extract_index
+from pptforge.layout_manager import LayoutManager
+from pptforge.media import DiagramManager, MediaManager
+from pptforge.models import ProposalConfig
+from pptforge.part_graph import PartGraphCopier
 
 
 def _get_slide_paths(src_zip: zipfile.ZipFile) -> list[str]:

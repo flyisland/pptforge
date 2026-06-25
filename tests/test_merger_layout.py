@@ -1,8 +1,9 @@
 import zipfile
+
 from lxml import etree
+
 from pptforge.merger import merge
 from pptforge.models import ProposalConfig, SlideSource
-
 
 P_NS = "http://schemas.openxmlformats.org/presentationml/2006/main"
 R_NS = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"

@@ -1,6 +1,7 @@
 """Generate minimal valid PPTX files for testing."""
 
 import zipfile
+
 from lxml import etree
 
 CT_NS = "http://schemas.openxmlformats.org/package/2006/content-types"
@@ -83,12 +84,12 @@ def make_slide_xml() -> bytes:
     cNvPr = etree.SubElement(nvSpPr, f"{{{P_NS}}}cNvPr")
     cNvPr.set("id", "1")
     cNvPr.set("name", "Title")
-    cNvSpPr = etree.SubElement(nvSpPr, f"{{{P_NS}}}cNvSpPr")
-    nvPr = etree.SubElement(nvSpPr, f"{{{P_NS}}}nvPr")
-    spPr = etree.SubElement(sp, f"{{{P_NS}}}spPr")
+    etree.SubElement(nvSpPr, f"{{{P_NS}}}cNvSpPr")
+    etree.SubElement(nvSpPr, f"{{{P_NS}}}nvPr")
+    etree.SubElement(sp, f"{{{P_NS}}}spPr")
     txBody = etree.SubElement(sp, f"{{{P_NS}}}txBody")
-    bodyPr = etree.SubElement(txBody, f"{{{A_NS}}}bodyPr")
-    lstStyle = etree.SubElement(txBody, f"{{{A_NS}}}lstStyle")
+    etree.SubElement(txBody, f"{{{A_NS}}}bodyPr")
+    etree.SubElement(txBody, f"{{{A_NS}}}lstStyle")
     p = etree.SubElement(txBody, f"{{{A_NS}}}p")
     r = etree.SubElement(p, f"{{{A_NS}}}r")
     t = etree.SubElement(r, f"{{{A_NS}}}t")
@@ -230,13 +231,13 @@ def make_slide_with_image_xml(image_rId: str) -> bytes:
     cNvPr = etree.SubElement(nvPicPr, f"{{{P_NS}}}cNvPr")
     cNvPr.set("id", "2")
     cNvPr.set("name", "Image")
-    cNvPicPr = etree.SubElement(nvPicPr, f"{{{P_NS}}}cNvPicPr")
-    nvPr = etree.SubElement(nvPicPr, f"{{{P_NS}}}nvPr")
+    etree.SubElement(nvPicPr, f"{{{P_NS}}}cNvPicPr")
+    etree.SubElement(nvPicPr, f"{{{P_NS}}}nvPr")
     blipFill = etree.SubElement(pic, f"{{{P_NS}}}blipFill")
     blip = etree.SubElement(blipFill, f"{{{A_NS}}}blip")
     blip.set(f"{{{R_NS}}}embed", image_rId)
     stretch = etree.SubElement(blipFill, f"{{{A_NS}}}stretch")
-    fillRect = etree.SubElement(stretch, f"{{{A_NS}}}fillRect")
+    etree.SubElement(stretch, f"{{{A_NS}}}fillRect")
     spPr = etree.SubElement(pic, f"{{{P_NS}}}spPr")
     xfrm = etree.SubElement(spPr, f"{{{A_NS}}}xfrm")
     off = etree.SubElement(xfrm, f"{{{A_NS}}}off")
@@ -428,9 +429,9 @@ def make_slide_layout_xml_v2(name: str = "Layout1") -> bytes:
     nvSpPr = etree.SubElement(sp, f"{{{P_NS}}}nvSpPr")
     cNvPr = etree.SubElement(nvSpPr, f"{{{P_NS}}}cNvPr")
     cNvPr.set("name", name)
-    cNvSpPr = etree.SubElement(nvSpPr, f"{{{P_NS}}}cNvSpPr")
-    nvPr = etree.SubElement(nvSpPr, f"{{{P_NS}}}nvPr")
-    spPr = etree.SubElement(sp, f"{{{P_NS}}}spPr")
+    etree.SubElement(nvSpPr, f"{{{P_NS}}}cNvSpPr")
+    etree.SubElement(nvSpPr, f"{{{P_NS}}}nvPr")
+    etree.SubElement(sp, f"{{{P_NS}}}spPr")
     return etree.tostring(root, xml_declaration=True, encoding="UTF-8", standalone=True)
 
 
@@ -438,7 +439,7 @@ def make_slide_master_xml_v2(name: str = "Master1") -> bytes:
     root = etree.Element(f"{{{P_NS}}}sldMaster", nsmap={None: P_NS})
     root.set("name", name)
     cSld = etree.SubElement(root, f"{{{P_NS}}}cSld")
-    spTree = etree.SubElement(cSld, f"{{{P_NS}}}spTree")
+    etree.SubElement(cSld, f"{{{P_NS}}}spTree")
     return etree.tostring(root, xml_declaration=True, encoding="UTF-8", standalone=True)
 
 
@@ -587,11 +588,11 @@ def create_with_metadata_pptx(path: str):
             cNvPr = etree.SubElement(nvSpPr, f"{{{P_NS}}}cNvPr")
             cNvPr.set("id", "1")
             cNvPr.set("name", "Notes")
-            cNvSpPr = etree.SubElement(nvSpPr, f"{{{P_NS}}}cNvSpPr")
-            nvPr = etree.SubElement(nvSpPr, f"{{{P_NS}}}nvPr")
-            spPr = etree.SubElement(sp, f"{{{P_NS}}}spPr")
+            etree.SubElement(nvSpPr, f"{{{P_NS}}}cNvSpPr")
+            etree.SubElement(nvSpPr, f"{{{P_NS}}}nvPr")
+            etree.SubElement(sp, f"{{{P_NS}}}spPr")
             txBody = etree.SubElement(sp, f"{{{P_NS}}}txBody")
-            bodyPr = etree.SubElement(txBody, f"{{{A_NS}}}bodyPr")
+            etree.SubElement(txBody, f"{{{A_NS}}}bodyPr")
             p = etree.SubElement(txBody, f"{{{A_NS}}}p")
             r_elem = etree.SubElement(p, f"{{{A_NS}}}r")
             t = etree.SubElement(r_elem, f"{{{A_NS}}}t")

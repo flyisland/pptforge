@@ -1,5 +1,4 @@
 import os
-import sys
 import zipfile
 
 import typer
@@ -7,15 +6,15 @@ from rich.console import Console
 from rich.table import Table
 
 from pptforge.config import load_proposal, resolve_source_pages
+from pptforge.extractor import extract_index
+from pptforge.merger import merge
 from pptforge.validator import (
-    validate_static,
-    validate_content,
-    validate_tags_in_pptx,
     ValidationError,
     _get_slide_count,
+    validate_content,
+    validate_static,
+    validate_tags_in_pptx,
 )
-from pptforge.merger import merge
-from pptforge.extractor import extract_index
 
 app = typer.Typer()
 console = Console()

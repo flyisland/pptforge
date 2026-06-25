@@ -1,23 +1,24 @@
 import hashlib
 import os
 import zipfile
+
 from lxml import etree
 
 from pptforge.constants import (
+    DIAGRAM_REL_TYPES,
+    MEDIA_REL_TYPES,
     P_NS,
     R_NS,
     REL_TYPES,
-    MEDIA_REL_TYPES,
-    DIAGRAM_REL_TYPES,
 )
-from pptforge.media import DiagramManager
+from pptforge.media import DiagramManager, MediaManager
 
 
 class LayoutManager:
     def __init__(
         self,
         base_zip: zipfile.ZipFile,
-        media_manager: "MediaManager | None" = None,
+        media_manager: MediaManager | None = None,
         diagram_manager: DiagramManager | None = None,
     ):
         self._layout_hashes: dict[tuple[str, str, str, str], str] = {}

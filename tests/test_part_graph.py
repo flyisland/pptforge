@@ -5,7 +5,6 @@ from lxml import etree
 from pptforge.merger import merge
 from pptforge.models import ProposalConfig, SlideSource
 
-
 CT_NS = "http://schemas.openxmlformats.org/package/2006/content-types"
 RELS_NS = "http://schemas.openxmlformats.org/package/2006/relationships"
 P_NS = "http://schemas.openxmlformats.org/presentationml/2006/main"

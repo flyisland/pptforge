@@ -95,6 +95,7 @@ PPTX 文件本质是 ZIP 压缩包。pptforge 逐字节复制 slide XML，仅更
 ## 开发
 
 ```bash
+uv run ruff check
 uv run pytest
 ```
 

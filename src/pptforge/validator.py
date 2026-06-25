@@ -1,11 +1,12 @@
 import os
 import zipfile
+
 from lxml import etree
 
-from pptforge.constants import REL_TYPES
-from pptforge.models import ProposalConfig
 from pptforge.config import _get_tagged_pages
-from pptforge.extractor import _parse_notes_metadata, _compute_tags, extract_index
+from pptforge.constants import REL_TYPES
+from pptforge.extractor import _compute_tags, _parse_notes_metadata, extract_index
+from pptforge.models import ProposalConfig
 
 
 class ValidationError(Exception):
@@ -120,7 +121,6 @@ def validate_content(proposal: ProposalConfig) -> list[str]:
 
 
 def validate_tags_in_pptx(pptx_path: str) -> list[str]:
-    errors = []
     per_page_notes: dict[int, dict] = {}
 
     try:

@@ -1,5 +1,10 @@
-import zipfile, os, struct, zlib
+import os
+import struct
+import zipfile
+import zlib
+
 from lxml import etree
+
 from pptforge.merger import merge
 from pptforge.models import ProposalConfig, SlideSource
 
@@ -111,7 +116,6 @@ def test_all_media_has_content_type(tmp_path):
 def _create_fixture_with_jpg(path, jpg_filename="image1.jpg", include_diagram=False):
     """Create a minimal PPTX with a .jpg media file for content-type testing."""
     img_data = _make_png_pixel(255, 0, 0)
-    slide_count = 1
     with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as z:
         z.writestr("[Content_Types].xml", _minimal_ct_xml())
         z.writestr(f"ppt/media/{jpg_filename}", img_data)
@@ -159,7 +163,7 @@ def _create_fixture_with_jpg(path, jpg_filename="image1.jpg", include_diagram=Fa
 
         slide = etree.Element(f"{{{P_NS}}}sld", nsmap={None: P_NS, "a": A_NS, "r": R_NS})
         cSld = etree.SubElement(slide, f"{{{P_NS}}}cSld")
-        spTree = etree.SubElement(cSld, f"{{{P_NS}}}spTree")
+        etree.SubElement(cSld, f"{{{P_NS}}}spTree")
         z.writestr("ppt/slides/slide1.xml", etree.tostring(slide, xml_declaration=True, encoding="UTF-8", standalone=True))
 
         slide_rels = _make_rels_root()
@@ -263,7 +267,6 @@ def test_docprops_slide_count_matches(tmp_path):
 
 def test_thumbnail_preserved_when_referenced(tmp_path):
     """docProps/thumbnail.* from the skeleton must be preserved when _rels/.rels references it."""
-    from pptforge.constants import REL_TYPES
     # Build using with_metadata.pptx as first source (has no thumbnail), then
     # manually verify the thumbnail from the skeleton isn't lost.
     output = str(tmp_path / "output.pptx")

@@ -1,9 +1,10 @@
 import os
 import zipfile
+
 from lxml import etree
 
-from pptforge.models import PresentationIndex, SlideMetadata
 from pptforge.constants import A_NS, REL_TYPES
+from pptforge.models import PresentationIndex, SlideMetadata
 
 
 class ExtractError(Exception):

@@ -1,6 +1,7 @@
 import pytest
-from pptforge.validator import validate_static, validate_content, ValidationError
+
 from pptforge.models import ProposalConfig, SlideSource
+from pptforge.validator import ValidationError, validate_content, validate_static
 
 
 def test_missing_file_reported():

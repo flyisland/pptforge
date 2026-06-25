@@ -1,5 +1,6 @@
 import os
-from pptforge.config import load_proposal, parse_source_expr, _parse_page_expr
+
+from pptforge.config import _parse_page_expr, load_proposal, parse_source_expr
 
 
 def test_parse_page_list():
