@@ -5,7 +5,7 @@ from lxml import etree
 
 from pptforge.config import _get_tagged_pages
 from pptforge.constants import REL_TYPES
-from pptforge.extractor import _compute_tags, _parse_notes_metadata, extract_index
+from pptforge.extractor import _collect_notes_metadata, _compute_tags, extract_index
 from pptforge.models import ProposalConfig
 
 
@@ -73,6 +73,12 @@ def validate_content(proposal: ProposalConfig) -> list[str]:
                     continue
 
                 slide_count = _get_slide_count(z)
+                tag_errors = validate_tags_in_pptx(src.pptx_path)
+                if tag_errors:
+                    for err in tag_errors:
+                        errors.append(f"\"{src.pptx_path}\"：{err}")
+                    continue
+
                 index = None
                 if src.tags:
                     try:
@@ -121,19 +127,8 @@ def validate_content(proposal: ProposalConfig) -> list[str]:
 
 
 def validate_tags_in_pptx(pptx_path: str) -> list[str]:
-    per_page_notes: dict[int, dict] = {}
-
     try:
-        with zipfile.ZipFile(pptx_path, "r") as z:
-            slide_count = _get_slide_count(z)
-            for i in range(slide_count):
-                page_num = i + 1
-                notes_path = f"ppt/notesSlides/notesSlide{i + 1}.xml"
-                if notes_path in z.namelist():
-                    notes_data = z.read(notes_path)
-                    per_page_notes[page_num] = _parse_notes_metadata(notes_data)
-                else:
-                    per_page_notes[page_num] = {}
+        per_page_notes = _collect_notes_metadata(pptx_path)
     except Exception as e:
         return [f"无法读取 \"{pptx_path}\"：{e}"]
 

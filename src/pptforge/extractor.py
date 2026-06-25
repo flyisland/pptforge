@@ -61,83 +61,76 @@ def _compute_tags(
     tags_dict: dict[str, list[int]] = {}
     pages_dict: dict[int, SlideMetadata] = {}
 
-    starts: dict[str, list[int]] = {}
-    ends: dict[str, list[int]] = {}
-
-    for page_num, notes in per_page_notes.items():
-        for tag in notes.get("tag-start", []):
-            starts.setdefault(tag, []).append(page_num)
-        for tag in notes.get("tag-end", []):
-            ends.setdefault(tag, []).append(page_num)
-
-    all_tag_names = set(starts.keys()) | set(ends.keys())
-
-    paired: dict[str, list[tuple[int, int]]] = {}
-    unpaired_starts: dict[str, list[int]] = {}
-
-    for tag in all_tag_names:
-        s_list = sorted(starts.get(tag, []))
-        e_list = sorted(ends.get(tag, []))
-        pairs = []
-        i = 0
-        while i < len(s_list) and i < len(e_list):
-            if s_list[i] <= e_list[i]:
-                pairs.append((s_list[i], e_list[i]))
-            else:
-                errors.append(
-                    f"第 {s_list[i]} 页：@tag-start: {tag} 在 @tag-end 之后"
-                )
-            i += 1
-        paired[tag] = pairs
-        if i < len(s_list):
-            unpaired_starts[tag] = s_list[i:]
-        if i < len(e_list):
-            for ep in e_list[i:]:
-                errors.append(f"第 {ep} 页：@tag-end: {tag} 没有对应的 @tag-start")
-
-    all_us: list[tuple[int, str]] = []
-    for tag, pages in unpaired_starts.items():
-        for p in pages:
-            all_us.append((p, tag))
-    all_us.sort()
-
     active: dict[str, int] = {}
-    auto_closed: list[tuple[str, int, int]] = []
-
-    for page, tag in all_us:
-        for act_tag, start_page in list(active.items()):
-            if page > start_page:
-                auto_closed.append((act_tag, start_page, page - 1))
-                del active[act_tag]
-        active[tag] = page
-
-    for tag, start_page in list(active.items()):
-        errors.append(f"第 {start_page} 页：@tag-start: {tag} 没有对应的 @tag-end")
-
+    nested_active: dict[str, list[int]] = {}
+    nested_outer_starts: dict[str, set[int]] = {}
+    conflict_starts: dict[str, set[int]] = {}
+    conflict_ends: dict[str, set[int]] = {}
     ranges: list[tuple[str, int, int]] = []
-    for tag, pairs_list in paired.items():
-        for s, e in pairs_list:
-            ranges.append((tag, s, e))
-    for tag, s, e in auto_closed:
-        ranges.append((tag, s, e))
+
+    for page_num in sorted(per_page_notes):
+        notes = per_page_notes[page_num]
+        for tag in notes.get("tag-start", []):
+            if tag in active:
+                nested_outer_starts.setdefault(tag, set()).add(active[tag])
+                conflict_starts.setdefault(tag, set()).update({active[tag], page_num})
+                nested_active.setdefault(tag, []).append(page_num)
+                continue
+            active[tag] = page_num
+        for tag in notes.get("tag-end", []):
+            if nested_active.get(tag):
+                start_page = nested_active[tag].pop()
+                conflict_starts.setdefault(tag, set()).add(start_page)
+                conflict_ends.setdefault(tag, set()).add(page_num)
+                continue
+            if tag not in active:
+                errors.append(f"第 {page_num} 页：@tag-end: {tag} 没有对应的 @tag-start")
+                continue
+            start_page = active.pop(tag)
+            if start_page in nested_outer_starts.get(tag, set()):
+                conflict_starts.setdefault(tag, set()).add(start_page)
+                conflict_ends.setdefault(tag, set()).add(page_num)
+            ranges.append((tag, start_page, page_num))
+
+    for tag in sorted(nested_active):
+        for start_page in nested_active[tag]:
+            conflict_starts.setdefault(tag, set()).add(start_page)
+
+    for tag in sorted(conflict_starts):
+        start_pages = ",".join(str(p) for p in sorted(conflict_starts[tag]))
+        end_pages = ",".join(str(p) for p in sorted(conflict_ends.get(tag, set()))) or "无"
+        errors.append(
+            f'tag "{tag}" 嵌套或重复：start={start_pages}；end={end_pages}'
+        )
+
+    for tag in sorted(active):
+        start_page = active[tag]
+        if start_page not in conflict_starts.get(tag, set()):
+            errors.append(f"第 {start_page} 页：@tag-start: {tag} 没有对应的 @tag-end")
+
+    invalid_tags = set(conflict_starts)
 
     for page_num in per_page_notes:
         page_tags = set()
         for tag, s, e in ranges:
-            if s <= page_num <= e:
+            if tag not in invalid_tags and s <= page_num <= e:
                 page_tags.add(tag)
         for tag in per_page_notes[page_num].get("tags", []):
-            page_tags.add(tag)
+            if tag not in invalid_tags:
+                page_tags.add(tag)
         pages_dict[page_num] = SlideMetadata(
             page=page_num, tags=sorted(page_tags)
         )
 
     for tag, s, e in ranges:
+        if tag in invalid_tags:
+            continue
         for p in range(s, e + 1):
             tags_dict.setdefault(tag, []).append(p)
     for page_num, notes in per_page_notes.items():
         for tag in notes.get("tags", []):
-            tags_dict.setdefault(tag, []).append(page_num)
+            if tag not in invalid_tags:
+                tags_dict.setdefault(tag, []).append(page_num)
 
     for tag in tags_dict:
         tags_dict[tag] = sorted(set(tags_dict[tag]))
@@ -166,7 +159,7 @@ def _find_notes_for_slide(
     return {}
 
 
-def extract_index(pptx_path: str) -> PresentationIndex:
+def _collect_notes_metadata(pptx_path: str) -> dict[int, dict]:
     per_page_notes: dict[int, dict] = {}
 
     with zipfile.ZipFile(pptx_path, "r") as z:
@@ -175,6 +168,11 @@ def extract_index(pptx_path: str) -> PresentationIndex:
             page_num = i + 1
             per_page_notes[page_num] = _find_notes_for_slide(z, slide_paths[i])
 
+    return per_page_notes
+
+
+def extract_index(pptx_path: str) -> PresentationIndex:
+    per_page_notes = _collect_notes_metadata(pptx_path)
     tags_dict, pages, _errors = _compute_tags(per_page_notes)
 
     return PresentationIndex(

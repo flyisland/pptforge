@@ -39,12 +39,20 @@ uv run pptforge --help
 ```
 
 - `@tags` — 单页 tag（逗号分隔）。常用于指定少数页面。
-- `@tag-start` / `@tag-end` — 范围 tag（支持嵌套和交叉）。用一头一尾包含一组页面，可自动适应页面数量的变更。
+- `@tag-start` / `@tag-end` — 范围 tag。用一头一尾包含一组页面，可自动适应页面数量的变更。
 - 其他 `@` 开头的字段被忽略
 
-Tag 范围通过配对 start/end 标记计算。未配对的 `@tag-start` 会自动结束前面的未闭合范围。文件末尾未闭合的范围会报错。
+Tag 范围通过同名 start/end 标记配对计算。`@tag-start` / `@tag-end` 必须成对出现；未配对的 start 或 end 都会报错。同名 tag 可以重复出现多个非重叠范围，但不能互相包含或嵌套；不同名 tag 的范围可以嵌套。
 
-### 3. 创建 proposal YAML
+如果同名 tag 出现嵌套或重复，`info` 会把该 tag 的 start/end 页码汇总到一条错误中，方便定位，例如：
+
+```text
+tag "test" 嵌套或重复：start=5,7；end=12,13
+```
+
+存在配对错误或同名嵌套错误的 tag 不会出现在 `info` 的 Tags 表格中，也不能用于 `build`。
+
+### 2. 创建 proposal YAML
 
 ```yaml
 description: 客户A初次拜访，侧重DevOps转型
@@ -73,7 +81,7 @@ slides:
 
 Slide notes 中定义的 tag（`@tags`、`@tag-start`/`@tag-end`）在构建时自动读取。
 
-### 4. 构建
+### 3. 构建
 
 ```bash
 pptforge build proposal.yaml --force

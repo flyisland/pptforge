@@ -342,9 +342,11 @@ SmartArt 的 diagram part 位于 `ppt/diagrams/`，常见文件名包括：
 ```
 
 Tag 范围计算（`_compute_tags`）：
-1. 按名称配对 `@tag-start` / `@tag-end`（支持嵌套）
-2. 未配对的 `@tag-start` 在下一个未配对的 start 之前自动结束
+1. 按名称配对 `@tag-start` / `@tag-end`
+2. 未配对的 `@tag-start` 报错
 3. 未配对的 `@tag-end` 报错
+4. 同名 tag 的范围可以重复出现，但不能互相包含或嵌套
+5. 不同名 tag 的范围可以嵌套
 
 ---
 
