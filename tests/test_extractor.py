@@ -1,4 +1,4 @@
-from pptforge.extractor import _compute_tags, extract_index
+from pptforge.extractor import _compute_tags, _parse_notes_metadata, extract_index
 
 
 def test_extract_tags_from_notes():
@@ -15,6 +15,33 @@ def test_extract_tags_from_notes():
     assert index.pages[1].tags == ["Pipeline", "devops", "自动化"]
     assert index.pages[2].tags == ["Pipeline", "重点"]
     assert index.pages[3].tags == ["Pipeline"]
+
+
+def test_parse_notes_metadata_preserves_line_breaks_inside_paragraph():
+    notes_xml = b"""<?xml version="1.0" encoding="UTF-8"?>
+<p:notes xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main"
+         xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main">
+  <p:cSld>
+    <p:spTree>
+      <p:sp>
+        <p:txBody>
+          <a:p>
+            <a:r><a:t>@tag-start: introduction</a:t></a:r>
+            <a:br/>
+            <a:r><a:t>@tags:</a:t></a:r>
+            <a:r><a:t> Chapter</a:t></a:r>
+            <a:r><a:t>, Opener</a:t></a:r>
+          </a:p>
+        </p:txBody>
+      </p:sp>
+    </p:spTree>
+  </p:cSld>
+</p:notes>"""
+
+    assert _parse_notes_metadata(notes_xml) == {
+        "tag-start": ["introduction"],
+        "tags": ["Chapter", "Opener"],
+    }
 
 
 def test_compute_tags_requires_tag_start_to_end_pair():

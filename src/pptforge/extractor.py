@@ -32,7 +32,7 @@ def _parse_notes_metadata(notes_xml: bytes) -> dict:
     root = etree.fromstring(notes_xml)
     lines = []
     for para in root.findall(f".//{{{A_NS}}}p"):
-        para_text = "".join(t.text or "" for t in para.findall(f".//{{{A_NS}}}t"))
+        para_text = _paragraph_text(para)
         if para_text.strip():
             lines.append(para_text)
     full_text = "\n".join(lines)
@@ -52,6 +52,16 @@ def _parse_notes_metadata(notes_xml: bytes) -> dict:
         elif key == "tag-end":
             result.setdefault("tag-end", []).append(value)
     return result
+
+
+def _paragraph_text(para: etree._Element) -> str:
+    parts: list[str] = []
+    for child in para:
+        if child.tag == f"{{{A_NS}}}br":
+            parts.append("\n")
+        else:
+            parts.extend(t.text or "" for t in child.findall(f".//{{{A_NS}}}t"))
+    return "".join(parts)
 
 
 def _compute_tags(
