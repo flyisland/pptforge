@@ -78,12 +78,17 @@ for source in proposal.sources:
 ```
 无 tag，无 :pages → 全部页面（1..N）
 无 tag，有 :pages → 基础列表 = 全部页面，应用页面表达式
-有 tag，无 :pages → 基础列表 = 匹配任意 tag 的页面（按 tag 顺序），直接返回
-有 tag，有 :pages → 基础列表 = 匹配 tag 的页面（按 tag 顺序），在基础列表上应用页面表达式
+有 tag，无 :pages → 基础列表 = tag 表达式筛选后的页面，直接返回
+有 tag，有 :pages → 基础列表 = tag 表达式筛选后的页面，在基础列表上应用页面表达式
 ```
 
-有 tag 时，返回的页面顺序保持 source expression 中 tag 的书写顺序
-（`[tag1, tag2]` → tag1 的页面在前，tag2 的页面在后）。
+tag 表达式中 `,` 表示并集，`&` 表示交集，`&` 优先级高于 `,`。
+例如 `[A & B, C & D & E]` 表示 `(A and B) or (C and D and E)`。
+
+有 tag 时，返回的页面顺序保持 source expression 中并集项的书写顺序。
+每个交集项以内，以 `&` 左侧第一个 tag 的页面顺序为基准，再用后续 tag
+过滤。因此 `[tag1 & tag2, tag3]` 会先输出同时带 `tag1` 和 `tag2`
+的页面（按 `tag1` 页序），再追加 `tag3` 的页面。
 负页码（`:-1`、`:-3--1`）相对于 tag 过滤后的基础列表计算。
 
 结果：一个扁平的列表 `all_slides = [(source_path, slide_path), ...]`。
@@ -348,6 +353,9 @@ Tag 范围计算（`_compute_tags`）：
 4. 同名 tag 的范围可以重复出现，但不能互相包含或嵌套
 5. 不同名 tag 的范围可以嵌套
 
+Tag 名不能包含 source 表达式的保留字符：`,`、`[`、`]`、`:`、`&`。
+其中 `,` 是并集分隔符，`&` 是交集操作符。
+
 ---
 
 ## 关系类型参考
@@ -383,7 +391,7 @@ Tag 范围计算（`_compute_tags`）：
 | master/layout id 全局唯一 | PowerPoint 将 `sldMasterId/@id` 与 `sldLayoutId/@id` 视作同一全局空间。跨源重复会触发 repair，所以迁移 master 时必须保留不冲突 id，并为冲突 id 重新分配。 |
 | diagram part 不做独立哈希去重 | SmartArt 由多个相互匹配的 diagram part 组成。独立去重会混用不同组的 data / drawing / style，导致 PowerPoint 修复内容。 |
 | 未知 internal relationship 递归复制 | OOXML 对象常由 part graph 表达。默认复制依赖闭包比静态白名单更稳健，新增对象类型不应天然断链。 |
-| Tag 顺序决定页面顺序 | 用户写 `[implementation, code-review]` 预期 implementaion 页面在前。`_get_tagged_pages()` 按 source.tags 顺序遍历，不按字母排序。 |
+| Tag 表达式顺序决定页面顺序 | 用户写 `[implementation, code-review]` 预期 implementation 页面在前。逗号分隔的并集项按书写顺序遍历；交集项按第一个 tag 的页序过滤，不按字母排序。 |
 | `.tmp` + `os.replace()` | 原子写入。合并中途崩溃不会留下损坏的 `.pptx`，最多残留一个 `.tmp` 文件，会被清理。 |
 | 先校验再写入 | 所有静态检查（文件存在、输出目录）和内容检查（tag 一致性）在 `ZipFile` 打开写入之前完成。尽早失败，不写任何东西。 |
 | 无缓存索引文件 | Tag 在构建时通过 `extract_index()` 从 slide notes 实时读取。无需独立的 index 步骤或 `.index.toml` 持久化。 |

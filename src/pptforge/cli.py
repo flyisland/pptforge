@@ -37,6 +37,10 @@ def _format_pages(pages: list[int]) -> str:
     return ", ".join(parts)
 
 
+def _format_tag_groups(tag_groups: list[list[str]]) -> str:
+    return ", ".join(" & ".join(group) for group in tag_groups)
+
+
 def _print_source_table(proposal) -> None:
     total = 0
     output_start = 1
@@ -53,7 +57,7 @@ def _print_source_table(proposal) -> None:
 
         src_name = os.path.basename(source.pptx_path)
 
-        tags_expr = "; ".join(source.tags)
+        tags_expr = _format_tag_groups(source.tag_groups)
         if source.pages is not None:
             tags_expr += f":{_format_pages(source.pages)}"
 

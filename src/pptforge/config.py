@@ -9,6 +9,9 @@ class ParseError(ValueError):
     pass
 
 
+RESERVED_TAG_CHARS = (",", "[", "]", ":", "&")
+
+
 def _parse_page_expr(expr: str) -> list[int]:
     parts = [p.strip() for p in expr.split(",")]
     result = []
@@ -42,8 +45,32 @@ def _parse_page_expr(expr: str) -> list[int]:
     return result
 
 
+def _validate_tag_name(tag: str) -> None:
+    for char in RESERVED_TAG_CHARS:
+        if char in tag:
+            raise ParseError(f'tag 名包含保留字符 "{char}"：{tag}')
+
+
+def _parse_tag_expr(expr: str) -> list[list[str]]:
+    tag_groups: list[list[str]] = []
+    for union_item in expr.split(","):
+        union_item = union_item.strip()
+        if not union_item:
+            raise ParseError(f"空的 tag 条件：{expr}")
+
+        group: list[str] = []
+        for tag in union_item.split("&"):
+            tag = tag.strip()
+            if not tag:
+                raise ParseError(f"空的 tag 条件：{expr}")
+            _validate_tag_name(tag)
+            group.append(tag)
+        tag_groups.append(group)
+    return tag_groups
+
+
 def parse_source_expr(expr: str) -> SlideSource:
-    tags: list[str] = []
+    tag_groups: list[list[str]] = []
     page_expr: str | None = None
 
     tag_start = expr.find("[")
@@ -52,7 +79,7 @@ def parse_source_expr(expr: str) -> SlideSource:
         if tag_end == -1:
             raise ParseError(f"缺少 ]：{expr}")
         tag_str = expr[tag_start + 1:tag_end]
-        tags = [t.strip() for t in tag_str.split(",") if t.strip()]
+        tag_groups = _parse_tag_expr(tag_str) if tag_str.strip() else []
         source_part = expr[:tag_start]
         remaining = expr[tag_end + 1:]
         if remaining:
@@ -69,8 +96,14 @@ def parse_source_expr(expr: str) -> SlideSource:
             source_part = expr
 
     pages = _parse_page_expr(page_expr) if page_expr else None
+    tags = [tag for group in tag_groups for tag in group]
 
-    return SlideSource(pptx_path=source_part, tags=tags, pages=pages)
+    return SlideSource(
+        pptx_path=source_part,
+        tags=tags,
+        pages=pages,
+        tag_groups=tag_groups,
+    )
 
 
 def _get_tagged_pages(index: PresentationIndex, tags: list[str]) -> list[int]:
@@ -84,6 +117,25 @@ def _get_tagged_pages(index: PresentationIndex, tags: list[str]) -> list[int]:
     return result
 
 
+def _get_tag_filtered_pages(index: PresentationIndex, tag_groups: list[list[str]]) -> list[int]:
+    seen: set[int] = set()
+    result: list[int] = []
+
+    for group in tag_groups:
+        if not group:
+            continue
+        group_pages = set(index.tags.get(group[0], []))
+        for tag in group[1:]:
+            group_pages &= set(index.tags.get(tag, []))
+
+        for page in sorted(index.tags.get(group[0], [])):
+            if page in group_pages and page not in seen:
+                seen.add(page)
+                result.append(page)
+
+    return result
+
+
 def resolve_source_pages(
     source: SlideSource,
     total_slide_count: int,
@@ -94,7 +146,7 @@ def resolve_source_pages(
             raise ValueError(
                 f"需要 index 文件来解析 tag 筛选：{source.pptx_path}"
             )
-        base = _get_tagged_pages(index, source.tags)
+        base = _get_tag_filtered_pages(index, source.tag_groups)
         if not base:
             return []
     else:
@@ -152,6 +204,7 @@ def load_proposal(path: str) -> ProposalConfig:
                 pptx_path=pptx_path,
                 tags=slide_source.tags,
                 pages=slide_source.pages,
+                tag_groups=slide_source.tag_groups,
             )
         )
 

@@ -6,6 +6,13 @@ class SlideSource:
     pptx_path: str
     tags: list[str] = field(default_factory=list)
     pages: list[int] | None = None
+    tag_groups: list[list[str]] = field(default_factory=list)
+
+    def __post_init__(self) -> None:
+        if self.tags and not self.tag_groups:
+            self.tag_groups = [[tag] for tag in self.tags]
+        elif self.tag_groups and not self.tags:
+            self.tags = [tag for group in self.tag_groups for tag in group]
 
 
 @dataclass

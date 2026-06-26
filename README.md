@@ -63,23 +63,37 @@ slides:
   - ./定制页.pptx:1 # 首页
   - ./sources/gitlab.pptx[CI/CD] # 取 tag=CI/CD 的所有页面
   - ./sources/gitlab.pptx[CI/CD, Pipeline]  # tag=CI/CD or tag=Pipeline 的页面合集
+  - ./sources/gitlab.pptx[CI/CD & 重点功能]  # 同时带有 CI/CD 和 重点功能 的页面
+  - ./sources/gitlab.pptx[CI/CD & 重点功能, Pipeline]  # (CI/CD and 重点功能) or Pipeline
   - ./sources/gitlab.pptx[CI/CD]:-1 # tag=CI/CD 的页面集的最后一页
   - ./sources/cases_fin.pptx:3, 5 # 该文件的第3和第5页
   - ./sources/kubernetes.pptx:3-7
   - ./定制页.pptx:-1 # 最后一页
 ```
 
-**源表达式语法**: `source[tag1, tag2, ...]:range1, range2, ...`
+**源表达式语法**: `source[tag_expr]:range1, range2, ...`
 
 | 部分 | 必填 | 说明 |
 |------|------|------|
 | `source` | ✅ | PPTX 文件路径（相对或绝对） |
-| `[tags]` | 可选 | 逗号分隔的 tag 筛选条件（并集）；顺序影响输出页面排序 |
+| `[tag_expr]` | 可选 | tag 筛选表达式。`,` 表示并集，`&` 表示交集，`&` 优先级高于 `,`；顺序影响输出页面排序 |
 | `:pages` | 可选 | 逗号分隔的页码表达式，1-based，相对于筛选后的集合 |
+
+Tag 表达式示例：
+
+| 表达式 | 含义 |
+|--------|------|
+| `[A, B]` | A or B |
+| `[A & B]` | A and B |
+| `[A & B & C]` | A and B and C |
+| `[A & B, C]` | (A and B) or C |
+
+输出顺序按逗号分隔的每个并集项依次处理；交集项以内，以 `&` 左侧第一个 tag 的页面顺序为基准，再用后续 tag 过滤。最终页面会去重。
 
 页码支持负数相对定位：`-1` = 最后一页，`-3--1` = 最后 3 页。
 
 Slide notes 中定义的 tag（`@tags`、`@tag-start`/`@tag-end`）在构建时自动读取。
+Tag 名不能包含保留字符：`,`、`[`、`]`、`:`、`&`。
 
 ### 3. 构建
 

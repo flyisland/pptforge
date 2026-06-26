@@ -39,6 +39,23 @@ def test_all_errors_collected():
     assert len(exc.value.errors) >= 2
 
 
+def test_static_validation_rejects_reserved_tag_characters():
+    proposal = ProposalConfig(
+        output_path="/tmp/out.pptx",
+        sources=[
+            SlideSource(
+                pptx_path="tests/fixtures/simple.pptx",
+                tags=["bad&tag"],
+            )
+        ],
+    )
+
+    with pytest.raises(ValidationError) as exc:
+        validate_static(proposal)
+
+    assert any("保留字符" in e and "&" in e and "bad&tag" in e for e in exc.value.errors)
+
+
 def test_content_validation_rejects_unpaired_tag_start(tmp_path):
     src = "tests/fixtures/with_metadata.pptx"
     broken = tmp_path / "broken_metadata.pptx"
@@ -58,3 +75,24 @@ def test_content_validation_rejects_unpaired_tag_start(tmp_path):
         validate_content(proposal)
 
     assert any("@tag-start: Pipeline" in e and "没有对应" in e for e in exc.value.errors)
+
+
+def test_content_validation_rejects_reserved_tag_characters(tmp_path):
+    src = "tests/fixtures/with_metadata.pptx"
+    broken = tmp_path / "reserved_tag_metadata.pptx"
+    with zipfile.ZipFile(src, "r") as zin, zipfile.ZipFile(broken, "w") as zout:
+        for item in zin.infolist():
+            data = zin.read(item.filename)
+            if item.filename == "ppt/notesSlides/notesSlide1.xml":
+                data = data.replace(b"devops", b"dev&amp;ops")
+            zout.writestr(item, data)
+
+    proposal = ProposalConfig(
+        output_path=str(tmp_path / "out.pptx"),
+        sources=[SlideSource(pptx_path=str(broken), pages=[1])],
+    )
+
+    with pytest.raises(ValidationError) as exc:
+        validate_content(proposal)
+
+    assert any("保留字符" in e and "&" in e and "dev&ops" in e for e in exc.value.errors)

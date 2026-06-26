@@ -3,7 +3,7 @@ import zipfile
 
 from lxml import etree
 
-from pptforge.config import _get_tagged_pages
+from pptforge.config import RESERVED_TAG_CHARS, _get_tag_filtered_pages
 from pptforge.constants import REL_TYPES
 from pptforge.extractor import _collect_notes_metadata, _compute_tags, extract_index
 from pptforge.models import ProposalConfig
@@ -50,6 +50,12 @@ def validate_static(proposal: ProposalConfig, force: bool = False) -> None:
             for tag in src.tags:
                 if not tag:
                     errors.append(f"tag 名为空：\"{src.pptx_path}\"")
+                for char in RESERVED_TAG_CHARS:
+                    if char in tag:
+                        errors.append(
+                            f'tag 名包含保留字符 "{char}"：{tag}'
+                        )
+                        break
 
         src_path = os.path.realpath(src.pptx_path)
         if src_path == output_path:
@@ -99,7 +105,7 @@ def validate_content(proposal: ProposalConfig) -> list[str]:
                     continue
 
                 if src.tags:
-                    base_count = len(_get_tagged_pages(index, src.tags)) if index else 0
+                    base_count = len(_get_tag_filtered_pages(index, src.tag_groups)) if index else 0
                 else:
                     base_count = slide_count
 
@@ -132,5 +138,27 @@ def validate_tags_in_pptx(pptx_path: str) -> list[str]:
     except Exception as e:
         return [f"无法读取 \"{pptx_path}\"：{e}"]
 
+    tag_name_errors = _validate_tag_names(per_page_notes)
     _, _, compute_errors = _compute_tags(per_page_notes)
-    return compute_errors
+    return tag_name_errors + compute_errors
+
+
+def _validate_tag_names(per_page_notes: dict[int, dict]) -> list[str]:
+    errors: list[str] = []
+    seen: set[tuple[int, str]] = set()
+
+    for page_num, notes in per_page_notes.items():
+        for field in ("tags", "tag-start", "tag-end"):
+            for tag in notes.get(field, []):
+                key = (page_num, tag)
+                if key in seen:
+                    continue
+                seen.add(key)
+                for char in RESERVED_TAG_CHARS:
+                    if char in tag:
+                        errors.append(
+                            f'第 {page_num} 页：tag 名包含保留字符 "{char}"：{tag}'
+                        )
+                        break
+
+    return errors
